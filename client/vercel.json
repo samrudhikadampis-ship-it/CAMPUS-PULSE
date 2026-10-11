@@ -3,7 +3,6 @@
     {
       "source": "/api/:path*",
       "destination": "https://REPLACE-WITH-BACKEND-URL/api/:path*"
-    },
-    { "source": "/(.*)", "destination": "/index.html" }
+    }
   ]
 }

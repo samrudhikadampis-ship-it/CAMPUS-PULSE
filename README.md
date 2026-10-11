@@ -530,7 +530,7 @@ npm run dev                              # API on :4000, web on http://localhost
 ```
 
 ## Deploying the Client to Vercel
-Set the Vercel project root directory to `client`, use the Vite preset, and keep the output directory as `dist`. Deploy the Express/MySQL backend separately, then replace `REPLACE-WITH-BACKEND-URL` in `client/vercel.json` with its HTTPS origin before deploying the client; the backend must expose the `/api/*` routes.
+Set the Vercel project root directory to `client`, use the Vite preset, and keep the output directory as `dist`. Deploy the Express/MySQL backend separately, then replace `REPLACE-WITH-BACKEND-URL` in `client/vercel.json` with its HTTPS origin before deploying the client; the backend must expose the `/api/*` routes. If the hosted MySQL provider requires TLS, set `DB_SSL=true` in the backend environment.
 
 ## 📡 API Overview
 | Route | Method | Description |

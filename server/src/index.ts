@@ -29,7 +29,10 @@ const db: Pool = mysql.createPool({
   database: process.env.DB_NAME || "campuspulse",
   dateStrings: true,
   timezone: "+05:30",
-  connectionLimit: 10
+  connectionLimit: 10,
+  ...(process.env.DB_SSL?.toLowerCase() === "true"
+    ? { ssl: { rejectUnauthorized: false } }
+    : {})
 });
 
 const app = express();
@@ -51,7 +54,7 @@ type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise
 const h = (fn: AsyncHandler) => (req: Request, res: Response, next: NextFunction) => {
   fn(req, res, next).catch((e: AppError) => {
     const status = e.status || (e.sqlState ? 400 : 500);
-    res.status(status).json({ error: e.sqlMessage || e.message });
+    res.status(status).json({ error: e.sqlMessage || e.message || e.code || "Unexpected API error" });
   });
 };
 
@@ -59,6 +62,10 @@ const rows = async <T extends RowDataPacket[]>(sql: string, params: any[] = []):
   const [data] = await db.query<T>(sql, params);
   return data;
 };
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
 
 // Committees
 app.get("/api/committees", h(async (_req, res) => {
