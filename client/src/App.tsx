@@ -180,10 +180,23 @@ const CUBE_TRANSFORMS = [
   "rotateX(-90deg) translateZ(100px)"
 ];
 
+function requireArray<T>(value: unknown, endpoint: string): T[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Invalid response from ${endpoint}: expected an array. Check that the backend API matches the app's expected data shape.`);
+  }
+  return value as T[];
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function App(): React.JSX.Element {
   const [events, setEvents] = useState<EventItem[]>(FALLBACK_EVENTS);
   const [orgs, setOrgs] = useState<Committee[]>(FALLBACK_ORGS);
   const [depts, setDepts] = useState<Department[]>(FALLBACK_DEPTS);
+  const [isLoading, setIsLoading] = useState(true);
+  const [startupError, setStartupError] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
   const [regs, setRegs] = useState<StudentRegistration[]>([]);
   const [allFeedback, setAllFeedback] = useState<FeedbackItem[]>([]);
@@ -229,13 +242,18 @@ export default function App(): React.JSX.Element {
 
   const refresh = async () => {
     try {
-      const [evList, stuList, fbList, crList, dsList] = await Promise.all([
-        api<EventItem[]>("/events").catch(() => FALLBACK_EVENTS),
-        api<Student[]>("/students").catch(() => []),
-        api<FeedbackItem[]>("/feedback").catch(() => []),
-        api<CertificateItem[]>("/certificates").catch(() => []),
-        api<DeptSummary[]>("/dept-summary").catch(() => [])
+      const [eventData, studentData, feedbackData, certificateData, summaryData] = await Promise.all([
+        api<unknown>("/events").catch(() => FALLBACK_EVENTS),
+        api<unknown>("/students").catch(() => []),
+        api<unknown>("/feedback").catch(() => []),
+        api<unknown>("/certificates").catch(() => []),
+        api<unknown>("/dept-summary").catch(() => [])
       ]);
+      const evList = requireArray<EventItem>(eventData, "/events");
+      const stuList = requireArray<Student>(studentData, "/students");
+      const fbList = requireArray<FeedbackItem>(feedbackData, "/feedback");
+      const crList = requireArray<CertificateItem>(certificateData, "/certificates");
+      const dsList = requireArray<DeptSummary>(summaryData, "/dept-summary");
       setEvents(evList);
       setStudents(stuList);
       setAllFeedback(fbList);
@@ -255,18 +273,66 @@ export default function App(): React.JSX.Element {
 
   // Initial load
   useEffect(() => {
-    api<Committee[]>("/committees").then(setOrgs).catch(() => setOrgs(FALLBACK_ORGS));
-    api<Department[]>("/departments").then(setDepts).catch(() => setDepts(FALLBACK_DEPTS));
-    refresh();
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [orgData, departmentData, eventData, studentData, feedbackData, certificateData, summaryData, registrationData] = await Promise.all([
+          api<unknown>("/committees"),
+          api<unknown>("/departments"),
+          api<unknown>("/events"),
+          api<unknown>("/students"),
+          api<unknown>("/feedback"),
+          api<unknown>("/certificates"),
+          api<unknown>("/dept-summary"),
+          active ? api<unknown>(`/students/${active}/registrations`) : Promise.resolve([])
+        ]);
+        const nextOrgs = requireArray<Committee>(orgData, "/committees");
+        const nextDepts = requireArray<Department>(departmentData, "/departments");
+        const nextEvents = requireArray<EventItem>(eventData, "/events");
+        const nextStudents = requireArray<Student>(studentData, "/students");
+        const nextFeedback = requireArray<FeedbackItem>(feedbackData, "/feedback");
+        const nextCerts = requireArray<CertificateItem>(certificateData, "/certificates");
+        const nextSummary = requireArray<DeptSummary>(summaryData, "/dept-summary");
+        const nextRegs = requireArray<StudentRegistration>(registrationData, "/students/:id/registrations");
+
+        if (cancelled) return;
+        setOrgs(nextOrgs);
+        setDepts(nextDepts);
+        setEvents(nextEvents);
+        setStudents(nextStudents);
+        setAllFeedback(nextFeedback);
+        setAllCerts(nextCerts);
+        setDeptSummary(nextSummary);
+        setRegs(nextRegs);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("CampusPulse startup failed:", error);
+          setStartupError(errorText(error));
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
   }, []);
 
   // When active student changes
+  const skipInitialActiveLoad = useRef(true);
   useEffect(() => {
     localStorage.setItem("cp_active", active);
+    if (skipInitialActiveLoad.current) {
+      skipInitialActiveLoad.current = false;
+      return;
+    }
     if (active) {
-      api<StudentRegistration[]>(`/students/${active}/registrations`)
-        .then(setRegs)
-        .catch(() => setRegs([]));
+      api<unknown>(`/students/${active}/registrations`)
+        .then((data) => setRegs(requireArray<StudentRegistration>(data, "/students/:id/registrations")))
+        .catch((error) => {
+          console.error("CampusPulse registrations failed:", error);
+          setStartupError(errorText(error));
+          setRegs([]);
+        });
     } else {
       setRegs([]);
     }
@@ -683,6 +749,31 @@ export default function App(): React.JSX.Element {
   }, [regs]);
 
   const currentRegEvent = events.find((e) => e.event_id === regEventId) || events[0];
+
+  const statusViewStyle: React.CSSProperties = {
+    minHeight: "100vh",
+    display: "grid",
+    placeItems: "center",
+    padding: 24,
+    background: "var(--bg)",
+    color: "var(--tx)"
+  };
+
+  if (isLoading) {
+    return <main role="status" style={statusViewStyle}>Loading CampusPulse…</main>;
+  }
+
+  if (startupError) {
+    return (
+      <main role="alert" style={statusViewStyle}>
+        <div style={{ maxWidth: 640 }}>
+          <h1 style={{ color: "var(--or2)", fontSize: 36 }}>CampusPulse couldn't load</h1>
+          <p>{startupError}</p>
+          <p>Next step: Check that the backend is deployed and client/vercel.json points to it.</p>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <>

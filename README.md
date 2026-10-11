@@ -529,6 +529,9 @@ npm install && npm run install:all
 npm run dev                              # API on :4000, web on http://localhost:5173
 ```
 
+## Deploying the Client to Vercel
+Set the Vercel project root directory to `client`, use the Vite preset, and keep the output directory as `dist`. Deploy the Express/MySQL backend separately, then replace `REPLACE-WITH-BACKEND-URL` in `client/vercel.json` with its HTTPS origin before deploying the client; the backend must expose the `/api/*` routes.
+
 ## 📡 API Overview
 | Route | Method | Description |
 |---|---|---|
