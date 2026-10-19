@@ -547,14 +547,18 @@ To inspect student profiles and committee applications directly in MySQL Workben
 SELECT * FROM admin_student_signup_details ORDER BY reg_id DESC;
 ```
 
-This view is part of the database schema; each row reflects current records in `students`, `user_accounts`, `registrations`, and related tables. Student accounts created without an application still appear in the Students table and the admin dashboard. The password hash is deliberately excluded from this view.
+This view is part of the database schema; each row reflects current records in `students`, `user_accounts`, `registrations`, and related tables. Student records and registrations remain available in the database even though the student-records directory is not shown in the portal. The password hash is deliberately excluded from this view.
 
 Passwords are stored as salted scrypt hashes. Login sessions are random bearer tokens with an eight-hour expiry; the database stores only their hashes. Configure HTTPS in deployments and restrict `CLIENT_ORIGIN` to the actual frontend origin. Committee accounts are created by an administrator and are server-scoped to their assigned committee. The admin portal requires an explicit committee selection for roster, feedback, attendance, and certificate operations; a committee account cannot widen its scope by changing request parameters. Registration cancellation preserves the underlying student and registration history. Certificates are issued only for active students with confirmed registrations, recorded attendance, and events that have ended; students can view only their own certificates.
+
+## Deploying the Client to Vercel
+Set the Vercel project root directory to `client`, use the Vite preset, and keep the output directory as `dist`. Deploy the Express/MySQL backend separately, then configure `VITE_API_URL` to its HTTPS origin before deploying the client; the backend must expose the `/api/*` routes. If the hosted MySQL provider requires TLS, set `DB_SSL=true` in the backend environment.
 
 ## 📡 API Overview
 | Route | Method | Description |
 |---|---|---|
 | `/api/auth/login`, `/api/auth/me`, `/api/auth/logout` | POST / GET | Separate role-checked portals and expiring sessions |
+| `/api/health` | GET | Lightweight backend health check |
 | `/api/auth/register-student` | POST | Create a student account and committee application transactionally |
 | `/api/admin/registrations` | GET | Admin or committee view scoped to one committee; committee accounts are server-restricted to their assigned committee |
 | `/api/events` | GET | Events with computed status, venue, links, registration count |

@@ -32,7 +32,10 @@ const db: Pool = mysql.createPool({
   database: process.env.DB_NAME || "campuspulse",
   dateStrings: true,
   timezone: "+05:30",
-  connectionLimit: 10
+  connectionLimit: 10,
+  ...(process.env.DB_SSL?.toLowerCase() === "true"
+    ? { ssl: {} }
+    : {})
 });
 
 type Role = "admin" | "student" | "committee";
@@ -66,9 +69,13 @@ app.use(express.json({ limit: "32kb" }));
 
 const fail = (status: number, error: string): Error & { status: number } =>
   Object.assign(new Error(error), { status });
+type AppError = Error & {
+  status?: number;
+  code?: string;
+};
 type AsyncHandler = (req: Request, res: Response, next: NextFunction) => Promise<void>;
 const h = (fn: AsyncHandler) => (req: Request, res: Response, next: NextFunction) => {
-  fn(req, res, next).catch((e: any) => {
+  fn(req, res, next).catch((e: AppError) => {
     if (e.status) return res.status(e.status).json({ error: e.message });
     if (e.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "This record already exists." });
     if (e.code === "ER_NO_REFERENCED_ROW_2" || e.code === "ER_CHECK_CONSTRAINT_VIOLATED") {
@@ -138,6 +145,10 @@ async function passwordMatches(password: string, stored: string): Promise<boolea
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
 
 const requireAuth = (req: Request, res: Response, next: NextFunction) => {
   const token = req.get("authorization")?.match(/^Bearer ([\da-f]{64})$/i)?.[1];
