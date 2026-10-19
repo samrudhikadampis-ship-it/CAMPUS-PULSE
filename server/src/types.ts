@@ -38,6 +38,12 @@ export interface EventItem {
   status: 'live' | 'up' | 'done';
   venue?: string | null;
   registered?: number;
+  capacity?: number | null;
+  remaining?: number | null;
+  registration_open?: boolean | number;
+  registration_closes_at?: string | null;
+  eligible_dept_id?: string | null;
+  registration_question?: string | null;
   links?: EventLink[];
 }
 
@@ -52,6 +58,8 @@ export interface Student {
   email: string | null;
   gender: 'Female' | 'Male' | 'Other' | null;
   dob: string | null;
+  is_active?: boolean | number;
+  department_verified?: boolean | number;
 }
 
 export interface Registration {

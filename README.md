@@ -23,8 +23,8 @@ SPIT committees announce events through Instagram posters and WhatsApp forms. Th
 ## 👥 User Roles & Capabilities
 | Role | Persona | Capabilities |
 |---|---|---|
-| **Admin** | Faculty coordinator | Manage committees, venues and events; verify payments; department analytics |
-| **Committee member** | Core team | Add events, mark attendance, verify payments for own committee |
+| **Admin** | Faculty coordinator | Choose a committee to review its applications and feedback; manage catalog and reports |
+| **Committee member** | Core team | Review applications and feedback, manage attendance, and cancel registrations for own committee |
 | **Student** | Any SPIT student | Browse, follow, register, pay, view certificates, give feedback |
 
 ## 🗄️ Database Design & Normalization
@@ -35,7 +35,7 @@ All DDL lives in [`schema/schema.sql`](schema/schema.sql); sample data in [`sche
 |---|---|
 | DBMS | MySQL 8.0+ (InnoDB, `utf8mb4`) |
 | Tables | 13 (4 reference/core, 2 engagement, 5 lifecycle, 2 supporting) |
-| Views | 2 — `event_status`, `dept_summary` |
+| Views | 3 — `event_status`, `dept_summary`, `admin_student_signup_details` |
 | Trigger | 1 — `trg_attendance` |
 | Stored procedure | 1 — `issue_certificates()` |
 | Normal form | BCNF (every determinant is a candidate key) |
@@ -524,25 +524,52 @@ campuspulse/
 git clone https://github.com/<your-username>/campuspulse.git && cd campuspulse
 mysql -u root -p < schema/schema.sql
 mysql -u root -p campuspulse < schema/seed.sql
+mysql -u root -p campuspulse < schema/migrations/001_secure_registration.sql
+mysql -u root -p campuspulse < schema/migrations/002_refresh_event_status_view.sql
+mysql -u root -p campuspulse < schema/migrations/003_registration_questions.sql
+mysql -u root -p campuspulse < schema/migrations/004_expand_password_hash.sql
+mysql -u root -p campuspulse < schema/migrations/005_student_self_registration_and_demo_events.sql
+mysql -u root -p campuspulse < schema/migrations/006_admin_student_signup_view.sql
 cp server/.env.example server/.env      # put your MySQL password in DB_PASSWORD
 npm install && npm run install:all
 npm run dev                              # API on :4000, web on http://localhost:5173
 ```
 
+### Authentication and deployment configuration
+
+Set `ADMIN_EMAIL`, `ADMIN_PASSWORD` (at least 12 characters), and `CLIENT_ORIGIN` in `server/.env`. The API creates the initial administrator account on first startup if that email is not already present; it never replaces an existing password. Keep these settings server-side and use a unique production password. If bootstrap settings are omitted, the API starts without creating an administrator.
+
+The migrations are additive and must be applied in order after `schema.sql` and `seed.sql`, before starting the updated server. They add student active status/audit history, event registration capacity, deadlines, one configurable required application question per event, account/session tables, a database guard against deleting student records, self-reported department verification, seven idempotently seeded demo events within the next week, and an admin-only application-details view. The latest view exposes student contact and department details together with committee application status without exposing password hashes. New students can create an account and apply to an open committee event; their submitted department stays pending until verified against the student record. Restricted committee registration requires that verification. The portal no longer displays a student accounts/records directory; student, registration, and audit records remain in the database and are not deleted when a registration is cancelled. Self-signup never creates an administrator account.
+
+To inspect student profiles and committee applications directly in MySQL Workbench or the MySQL CLI, connect to the `campuspulse` database and run:
+
+```sql
+SELECT * FROM admin_student_signup_details ORDER BY reg_id DESC;
+```
+
+This view is part of the database schema; each row reflects current records in `students`, `user_accounts`, `registrations`, and related tables. Student accounts created without an application still appear in the Students table and the admin dashboard. The password hash is deliberately excluded from this view.
+
+Passwords are stored as salted scrypt hashes. Login sessions are random bearer tokens with an eight-hour expiry; the database stores only their hashes. Configure HTTPS in deployments and restrict `CLIENT_ORIGIN` to the actual frontend origin. Committee accounts are created by an administrator and are server-scoped to their assigned committee. The admin portal requires an explicit committee selection for roster, feedback, attendance, and certificate operations; a committee account cannot widen its scope by changing request parameters. Registration cancellation preserves the underlying student and registration history. Certificates are issued only for active students with confirmed registrations, recorded attendance, and events that have ended; students can view only their own certificates.
+
 ## 📡 API Overview
 | Route | Method | Description |
 |---|---|---|
+| `/api/auth/login`, `/api/auth/me`, `/api/auth/logout` | POST / GET | Separate role-checked portals and expiring sessions |
+| `/api/auth/register-student` | POST | Create a student account and committee application transactionally |
+| `/api/admin/registrations` | GET | Admin or committee view scoped to one committee; committee accounts are server-restricted to their assigned committee |
 | `/api/events` | GET | Events with computed status, venue, links, registration count |
-| `/api/committees`, `/api/departments` | GET | Lookup lists |
-| `/api/students` | GET / POST | List or create student profiles |
-| `/api/students/:id` | DELETE | Remove a student |
-| `/api/students/:id/registrations` | GET | Registrations with payment, attendance, certificate, feedback |
-| `/api/registrations` | POST | Register (and record payment) in one transaction |
-| `/api/payments/:id/verify` | POST | Mark a payment verified |
-| `/api/attendance/check-in`, `/check-out` | POST | Record attendance |
-| `/api/feedback` | POST | Rate an attended event |
-| `/api/admin/issue-certificates` | POST | Calls `issue_certificates()` |
-| `/api/dept-summary` | GET | Students, attendance and certificates per department |
+| `/api/committees`, `/api/departments`, `/api/venues` | GET | Live lookup lists |
+| `/api/students` | GET / POST | Admin-only student search/list and creation |
+| `/api/students/:id`, `/api/students/:id/status` | PUT / PATCH | Admin edit, activate/deactivate, password setup; history is retained |
+| `/api/students/:id/registrations` | GET | Admin view or authenticated student's own registrations |
+| `/api/registrations` | POST | Authenticated student registration; department, eligibility, dates, duplicate rules and capacity enforced transactionally |
+| `/api/admin/events`, `/api/admin/committees`, `/api/admin/venues` | POST / PUT | Admin-only catalog, venue, registration status and capacity management |
+| `/api/payments`, `/api/payments/:id/verify` | GET / POST | Admin-only payment review |
+| `/api/attendance/check-in`, `/check-out` | POST | Admin or committee attendance management, scoped to the selected/assigned committee |
+| `/api/admin/registrations/:id` | DELETE | Admin or committee cancellation within the selected/assigned committee; history is retained |
+| `/api/feedback` | GET / POST | Students access their own feedback; staff access is limited to one committee |
+| `/api/admin/issue-certificates` | POST | Admin or committee issuance for eligible attended registrations in the selected/assigned committee |
+| `/api/dept-summary` | GET | Admin-only student, attendance and certificate summary |
 
 ## 🎓 Academic Project & Team
 **Case Study:** CampusPulse — SPIT Committee Events · **Members:** _add names and UIDs_

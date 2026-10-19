@@ -38,6 +38,12 @@ export interface EventItem {
   status: 'live' | 'up' | 'done';
   venue?: string | null;
   registered?: number;
+  capacity?: number | null;
+  remaining?: number | null;
+  registration_open?: number | boolean;
+  registration_closes_at?: string | null;
+  eligible_dept_id?: string | null;
+  registration_question?: string | null;
   links?: EventLink[];
 }
 
@@ -52,14 +58,26 @@ export interface Student {
   email: string | null;
   gender: 'Female' | 'Male' | 'Other' | null;
   dob: string | null;
+  is_active?: boolean | number;
+  department_verified?: boolean | number;
   reg_count?: number;
   att_count?: number;
 }
 
 export interface StudentRegistration {
   reg_id: number;
+  student_id?: string;
+  first_name?: string;
+  last_name?: string;
+  dept_id?: string;
+  email?: string | null;
+  phone?: string | null;
+  department_verified?: boolean | number;
   registered_on: string;
+  registration_status?: 'Confirmed' | 'Cancelled';
+  application_answer?: string | null;
   event_id: number;
+  committee_id: string;
   name: string;
   event_status: 'live' | 'up' | 'done';
   payment_id?: number | null;

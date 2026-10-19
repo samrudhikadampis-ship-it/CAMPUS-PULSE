@@ -1,150 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./api";
+import { api, setAuthToken } from "./api";
 import {
   Committee,
   Department,
   EventItem,
-  Student,
   StudentRegistration,
-  DeptSummary,
   FeedbackItem,
-  CertificateItem
+  Venue
 } from "./types";
-
-// Static fallback data in case database is cold-starting or offline
-const FALLBACK_DEPTS: Department[] = [
-  { dept_id: "EXTC", name: "Electronics & Telecommunication" },
-  { dept_id: "CSE", name: "Computer Science & Engineering" },
-  { dept_id: "CE", name: "Computer Engineering" }
-];
-
-const FALLBACK_ORGS: Committee[] = [
-  { committee_id: "IEEE", name: "IEEE SPIT", tagline: "IEEE student branch", instagram_handle: "ieee_spit" },
-  { committee_id: "IEEECS", name: "IEEE CS SPIT", tagline: "IEEE Computer Society chapter", instagram_handle: "ieee.cs.spit" },
-  { committee_id: "CSI", name: "C.S.I. SPIT", tagline: "Computer Society of India student branch", instagram_handle: "csispit" },
-  { committee_id: "MUDRA", name: "Mudra", tagline: "Dance, music & theatre", instagram_handle: "mudra_spit" },
-  { committee_id: "FACE", name: "FACE", tagline: "Placements & career prep", instagram_handle: "face_spit" },
-  { committee_id: "OCULUS", name: "Oculus", tagline: "Photography & film", instagram_handle: "o.c.u.l.u.s_s.p.i.t" },
-  { committee_id: "ECELL", name: "E-Cell SPIT", tagline: "Entrepreneurship cell", instagram_handle: "ecellspit" },
-  { committee_id: "WIE", name: "IEEE WIE SPIT", tagline: "Women in Engineering affinity group", instagram_handle: "wie_ieee_spit" },
-  { committee_id: "FEC", name: "FEC SPIT", tagline: "Student committee", instagram_handle: "fec_spit" },
-  { committee_id: "ENACTUS", name: "Enactus SPIT", tagline: "Enactus student chapter", instagram_handle: null },
-  { committee_id: "AGILITY", name: "Agility Cup", tagline: "Sports & e-sports tournament", instagram_handle: null },
-  { committee_id: "CAMPUS", name: "SPIT Campus", tagline: "Institute-level events", instagram_handle: null }
-];
-
-const AG_URL = "https://agility-2026.vercel.app/";
-
-const FALLBACK_EVENTS: EventItem[] = [
-  {
-    event_id: 1, committee_id: "CSI", name: "Codehousie",
-    venue_id: "v408", venue: "Room 408 (New building)",
-    description: "Competitive Programming × Housie. Every solve gets you closer to a win. Row house, full house and more prizes.",
-    start_ts: "2026-10-15 17:00:00", end_ts: "2026-10-15 20:00:00",
-    fee: 150, fee_note: "Solo · Duo ₹200", audience: "FE | SE | TE + BE", prize: "₹7,500",
-    contact: "Omkar Gajare 98196 66393 · Dron Parekh 88504 02032",
-    status: "up", registered: 0,
-    links: [
-      { link_id: 1, event_id: 1, label: "Solo registration", url: "https://tinyurl.com/598twjvn" },
-      { link_id: 2, event_id: 1, label: "Duo registration", url: "https://tinyurl.com/3wzvfbhw" }
-    ]
-  },
-  {
-    event_id: 2, committee_id: "CSI", name: "SourceStart",
-    venue_id: null, venue: "Online arena",
-    description: "Open-source contest. Register, raise your PR and get your name on the leaderboard.",
-    start_ts: null, end_ts: null, fee: null, fee_note: null, audience: "All students", prize: "Certificates & Swag",
-    contact: null, status: "live", registered: 0,
-    links: [
-      { link_id: 3, event_id: 2, label: "Join the arena", url: "https://forms.gle/HL1mruv5EfdfJxMY7" },
-      { link_id: 4, event_id: 2, label: "Leaderboard", url: "https://git.csispit.site/leaderboard" }
-    ]
-  },
-  {
-    event_id: 3, committee_id: "ENACTUS", name: "Rajgad Trek '26",
-    venue_id: "raj", venue: "Rajgad Fort",
-    description: "Not just a trek. Where history meets adventure. Posters mention 17–18 Oct; one lists 17 Oct only.",
-    start_ts: "2026-10-17 06:00:00", end_ts: "2026-10-18 20:00:00", fee: null, fee_note: null,
-    audience: "All batches", prize: null, contact: "Riyaa +91 88068 05539 · Diksha +91 74980 65056",
-    status: "up", registered: 0,
-    links: [
-      { link_id: 5, event_id: 3, label: "Registration form", url: "https://docs.google.com/forms/d/e/1FAIpQLScBtyFq56xU93zF8NJ0IHrrl0yYBLogym-lXQIG526CtLCfGA/viewform" },
-      { link_id: 6, event_id: 3, label: "Updates group", url: "https://chat.whatsapp.com/KZd9j1bNKrjI4Rqs3U0E1z" }
-    ]
-  },
-  {
-    event_id: 4, committee_id: "AGILITY", name: "Table Tennis · Men's Singles",
-    venue_id: "gym", venue: "Gymkhana",
-    description: "Agility Cup table tennis, men's singles.",
-    start_ts: "2026-10-08 09:00:00", end_ts: "2026-10-08 18:00:00", fee: null, fee_note: null,
-    audience: "Men", prize: "Trophy + Cash", contact: null, status: "done", registered: 0,
-    links: [{ link_id: 7, event_id: 4, label: "Register", url: AG_URL }]
-  },
-  {
-    event_id: 5, committee_id: "AGILITY", name: "Table Tennis · Doubles + Women's Singles",
-    venue_id: "gym", venue: "Gymkhana",
-    description: "Rescheduled to 26 Oct. Registrations extended.",
-    start_ts: "2026-10-26 10:00:00", end_ts: "2026-10-26 19:00:00", fee: null, fee_note: null,
-    audience: "All", prize: "Medals", contact: null, status: "up", registered: 0,
-    links: [{ link_id: 8, event_id: 5, label: "Register", url: AG_URL }]
-  },
-  {
-    event_id: 6, committee_id: "AGILITY", name: "Chess",
-    venue_id: null, venue: "Gymkhana Chess Hall",
-    description: "Agility Cup chess, 28 and 29 Oct.",
-    start_ts: "2026-10-28 11:00:00", end_ts: "2026-10-29 17:00:00", fee: null, fee_note: null,
-    audience: "Open to all", prize: "Trophy", contact: null, status: "up", registered: 0,
-    links: [{ link_id: 9, event_id: 6, label: "Register", url: AG_URL }]
-  },
-  {
-    event_id: 7, committee_id: "AGILITY", name: "BGMI",
-    venue_id: null, venue: "Online Discord",
-    description: "Agility Cup e-sports takeover.",
-    start_ts: "2026-10-12 18:00:00", end_ts: "2026-10-12 22:00:00", fee: null, fee_note: null,
-    audience: "Teams of 4", prize: "₹5,000", contact: null, status: "live", registered: 0,
-    links: [{ link_id: 10, event_id: 7, label: "Register", url: AG_URL }]
-  },
-  {
-    event_id: 8, committee_id: "AGILITY", name: "Free Fire",
-    venue_id: null, venue: "Online Discord",
-    description: "Agility Cup e-sports takeover.",
-    start_ts: "2026-10-13 18:00:00", end_ts: "2026-10-13 22:00:00", fee: null, fee_note: null,
-    audience: "Teams of 4", prize: "₹3,000", contact: null, status: "up", registered: 0,
-    links: [{ link_id: 11, event_id: 8, label: "Register", url: AG_URL }]
-  },
-  {
-    event_id: 9, committee_id: "AGILITY", name: "FC Mobile & FC 25 (PS5)",
-    venue_id: "gym", venue: "Console Room, Gymkhana",
-    description: "Agility Cup e-sports takeover.",
-    start_ts: "2026-10-15 14:00:00", end_ts: "2026-10-15 19:00:00", fee: null, fee_note: null,
-    audience: "Gamers", prize: "₹4,000", contact: null, status: "up", registered: 0,
-    links: [{ link_id: 12, event_id: 9, label: "Register", url: AG_URL }]
-  },
-  {
-    event_id: 10, committee_id: "AGILITY", name: "Clash Royale",
-    venue_id: null, venue: "Online Discord",
-    description: "Agility Cup e-sports takeover.",
-    start_ts: "2026-10-16 17:00:00", end_ts: "2026-10-16 20:00:00", fee: null, fee_note: null,
-    audience: "Solo", prize: "₹2,500", contact: null, status: "up", registered: 0,
-    links: [{ link_id: 13, event_id: 10, label: "Register", url: AG_URL }]
-  },
-  {
-    event_id: 11, committee_id: "CAMPUS", name: "Personal Safety & Self-Defence Workshop",
-    venue_id: "gym", venue: "Gymkhana",
-    description: "Led by Master Cheetah Yagnesh Shetty. Practical self-defence skills for every fitness level.",
-    start_ts: "2026-10-08 16:00:00", end_ts: "2026-10-08 17:00:00", fee: null, fee_note: null,
-    audience: "Girls", prize: null, contact: null, status: "done", registered: 0
-  },
-  {
-    event_id: 12, committee_id: "CAMPUS", name: "Sardar Patel Run for Unity 2026",
-    venue_id: "powai", venue: "Hiranandani Gardens, Powai",
-    description: "10 KM and 5 KM timed runs, 3 KM fun run. Includes T-shirt, finisher medal, goodies and breakfast.",
-    start_ts: "2026-11-01 05:30:00", end_ts: "2026-11-01 10:00:00", fee: null, fee_note: "Free for SPIT students (fee reimbursed)",
-    audience: "All runners", prize: "Finisher Medals", contact: "Siddhesh Chandanpat 9423416268",
-    status: "up", registered: 0,
-    links: [{ link_id: 14, event_id: 12, label: "Register", url: "https://registrations.indiarunning.com/spitsardarpatelrunforunity2026-66625" }]
-  }
-];
 
 const feeText = (e: EventItem) =>
   e.fee ? `₹${e.fee}${e.fee_note ? " · " + e.fee_note : ""}` : e.fee_note || (e.fee === 0 ? "Free" : "Fee: see registration form");
@@ -169,6 +32,14 @@ const label: Record<string, string> = {
   up: "UPCOMING",
   done: "COMPLETED"
 };
+const registrationState = (event: EventItem): "Open" | "Full" | "Closed" => {
+  if (!event.registration_open || event.status === "done" ||
+      (event.registration_closes_at && Date.parse(event.registration_closes_at.replace(" ", "T")) <= Date.now())) {
+    return "Closed";
+  }
+  if (event.remaining != null && Number(event.remaining) <= 0) return "Full";
+  return "Open";
+};
 
 const CUBE_FACES = ["IEEE", "IEEE CS", "CSI", "MUDRA", "FACE", "OCULUS"];
 const CUBE_TRANSFORMS = [
@@ -180,17 +51,245 @@ const CUBE_TRANSFORMS = [
   "rotateX(-90deg) translateZ(100px)"
 ];
 
-export default function App(): React.JSX.Element {
-  const [events, setEvents] = useState<EventItem[]>(FALLBACK_EVENTS);
-  const [orgs, setOrgs] = useState<Committee[]>(FALLBACK_ORGS);
-  const [depts, setDepts] = useState<Department[]>(FALLBACK_DEPTS);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [regs, setRegs] = useState<StudentRegistration[]>([]);
-  const [allFeedback, setAllFeedback] = useState<FeedbackItem[]>([]);
-  const [allCerts, setAllCerts] = useState<CertificateItem[]>([]);
-  const [deptSummary, setDeptSummary] = useState<DeptSummary[]>([]);
+interface AuthUser {
+  account_id: number;
+  username: string;
+  role: "admin" | "student" | "committee";
+  student_id: string | null;
+  committee_id: string | null;
+  first_name?: string;
+  last_name?: string;
+  dept_id?: string;
+  study_year?: string;
+  division?: string;
+  email?: string | null;
+  is_active?: boolean | number;
+  department_verified?: boolean | number;
+}
 
-  const [active, setActive] = useState<string>(() => localStorage.getItem("cp_active") || "");
+type StudentSignup = Record<string, string | number>;
+
+function SignIn({
+  onSignedIn,
+  onRegister
+}: {
+  onSignedIn: (role: "admin" | "student", username: string, password: string, committeeId?: string) => Promise<void>;
+  onRegister: (details: StudentSignup) => Promise<void>;
+}): React.JSX.Element {
+  const [role, setRole] = useState<"admin" | "student">("student");
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [committees, setCommittees] = useState<Committee[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [loginCommittees, setLoginCommittees] = useState<Committee[]>([]);
+  const [loginCommitteeId, setLoginCommitteeId] = useState("");
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState("");
+
+  useEffect(() => {
+    if (role !== "admin") return;
+    let mounted = true;
+    api<Committee[]>("/committees").then((items) => {
+      if (mounted) {
+        setLoginCommittees(items);
+        setLoginCommitteeId(items[0]?.committee_id || "");
+      }
+    }).catch((cause: unknown) => {
+      if (mounted) setError(cause instanceof Error ? cause.message : "Unable to load committee choices.");
+    });
+    return () => { mounted = false; };
+  }, [role]);
+
+  useEffect(() => {
+    if (!creating) return;
+    let mounted = true;
+    setCatalogLoading(true);
+    Promise.all([
+      api<Department[]>("/departments"),
+      api<Committee[]>("/committees"),
+      api<EventItem[]>("/events")
+    ]).then(([deptList, committeeList, eventList]) => {
+      if (!mounted) return;
+      setDepartments(deptList);
+      setCommittees(committeeList);
+      const options = eventList.filter((event) =>
+        registrationState(event) === "Open" && !event.eligible_dept_id
+      );
+      setEvents(options);
+      if (options.length) setSelectedEventId(String(options[0].event_id));
+      setError("");
+    }).catch((cause: unknown) => {
+      if (mounted) setError(cause instanceof Error ? cause.message : "Unable to load registration options.");
+    }).finally(() => {
+      if (mounted) setCatalogLoading(false);
+    });
+    return () => { mounted = false; };
+  }, [creating]);
+
+  const selectedEvent = events.find((event) => String(event.event_id) === selectedEventId);
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    setPending(true);
+    setError("");
+    try {
+      await onSignedIn(
+        role,
+        String(values.get("username") || ""),
+        String(values.get("password") || ""),
+        role === "admin" ? loginCommitteeId : undefined
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to sign in.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const submitRegistration = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedEvent) {
+      setError("Choose an available committee event.");
+      return;
+    }
+    const values = new FormData(event.currentTarget);
+    setPending(true);
+    setError("");
+    try {
+      const details: StudentSignup = {
+        student_id: String(values.get("student_id") || ""),
+        first_name: String(values.get("first_name") || ""),
+        last_name: String(values.get("last_name") || ""),
+        dept_id: String(values.get("dept_id") || ""),
+        study_year: String(values.get("study_year") || ""),
+        division: String(values.get("division") || ""),
+        email: String(values.get("email") || ""),
+        phone: String(values.get("phone") || ""),
+        gender: String(values.get("gender") || ""),
+        dob: String(values.get("dob") || ""),
+        password: String(values.get("password") || ""),
+        event_id: Number(selectedEvent.event_id),
+        application_answer: String(values.get("application_answer") || ""),
+        txn_ref: String(values.get("txn_ref") || ""),
+        method: String(values.get("method") || "UPI")
+      };
+      await onRegister(details);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to complete registration.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card panel pad">
+        <span className="logo">CAMPUS<em>PULSE</em></span>
+        <h1>{role === "admin" ? "Admin portal" : "Student portal"}</h1>
+        <p className="mu">{creating ? "Create your student profile and apply to a committee in one step." : "Sign in with your CampusPulse account to continue."}</p>
+        <div className="ctl" role="group" aria-label="Choose a sign-in portal">
+          {(["student", "admin"] as const).map((portal) => (
+            <button key={portal} className="chip" aria-pressed={role === portal} onClick={() => { setRole(portal); setCreating(false); }}>
+              {portal === "student" ? "Student" : "Admin / committee admin"}
+            </button>
+          ))}
+        </div>
+        {creating ? (
+          <form onSubmit={submitRegistration}>
+            <div className="fg">
+              <label>First name<input className="in" name="first_name" maxLength={50} autoComplete="given-name" required /></label>
+              <label>Last name<input className="in" name="last_name" maxLength={50} autoComplete="family-name" required /></label>
+              <label>Student ID <span className="mu">(optional)</span><input className="in" name="student_id" maxLength={20} autoComplete="off" placeholder="Leave blank to generate one" /></label>
+              <label>Email<input className="in" name="email" type="email" maxLength={120} autoComplete="email" required /></label>
+              <label>Branch / department<select className="in" name="dept_id" required defaultValue=""><option value="" disabled>Select your branch</option>{departments.map((department) => <option key={department.dept_id} value={department.dept_id}>{department.dept_id} · {department.name}</option>)}</select></label>
+              <label>Year<select className="in" name="study_year" defaultValue="FE"><option>FE</option><option>SE</option><option>TE</option><option>BE</option></select></label>
+              <label>Division<input className="in" name="division" maxLength={5} defaultValue="A" required /></label>
+              <label>Phone <span className="mu">(optional)</span><input className="in" name="phone" type="tel" maxLength={15} autoComplete="tel" /></label>
+              <label>Gender <span className="mu">(optional)</span><select className="in" name="gender" defaultValue=""><option value="">Prefer not to say</option><option>Female</option><option>Male</option><option>Other</option></select></label>
+              <label>Date of birth <span className="mu">(optional)</span><input className="in" name="dob" type="date" /></label>
+              <label className="wide-field">Committee event
+                <select className="in" value={selectedEventId} onChange={(change) => setSelectedEventId(change.target.value)} required disabled={catalogLoading || !events.length}>
+                  {events.map((event) => {
+                    const committee = committees.find((item) => item.committee_id === event.committee_id);
+                    const seats = event.remaining == null ? "Seats available" : `${event.remaining} seats left`;
+                    return <option key={event.event_id} value={event.event_id}>{committee?.name || event.committee_id} · {event.name} · {seats}</option>;
+                  })}
+                </select>
+              </label>
+              {selectedEvent && <div className="registration-review wide-field">
+                <span className="m mu">COMMITTEE APPLICATION</span>
+                <h3>{committees.find((committee) => committee.committee_id === selectedEvent.committee_id)?.name || selectedEvent.committee_id}</h3>
+                <p>{selectedEvent.name}</p>
+                <p className="mu">{selectedEvent.description || "Committee registration"}</p>
+                <p className="m mu">
+                  {selectedEvent.venue || "Venue to be announced"} · {whenText(selectedEvent)}
+                  {" · "}{feeText(selectedEvent)}{" · "}{selectedEvent.capacity == null
+                    ? `${selectedEvent.registered || 0} registered · capacity not limited`
+                    : `${selectedEvent.registered || 0} / ${selectedEvent.capacity} registered · ${selectedEvent.remaining} seats left`}
+                </p>
+              </div>}
+              {selectedEvent?.registration_question && <label className="wide-field">{selectedEvent.registration_question}<textarea className="in" name="application_answer" rows={3} maxLength={2000} required /></label>}
+              {selectedEvent && Number(selectedEvent.fee) > 0 && <>
+                <label>Payment method<select className="in" name="method"><option>UPI</option><option>Card</option><option>Cash</option></select></label>
+                <label>Payment reference<input className="in" name="txn_ref" minLength={6} maxLength={60} required /></label>
+              </>}
+              <label>Password <span className="mu">(8+ characters)</span><input className="in" name="password" type="password" minLength={8} maxLength={256} autoComplete="new-password" required /></label>
+            </div>
+            <p className="note">Your department is saved as self-reported until an administrator verifies it. Department-restricted events remain unavailable until then.</p>
+            {catalogLoading && <p className="mu" role="status">Loading open committees…</p>}
+            {!catalogLoading && !events.length && <p className="auth-error" role="alert">There are no unrestricted committee events open for registration right now.</p>}
+            {error && <p className="auth-error" role="alert">{error}</p>}
+            <button className="btn" disabled={pending || catalogLoading || !events.length}>{pending ? "Creating your account…" : "Create account & register"}</button>
+          </form>
+        ) : (
+          <>
+            <form onSubmit={submit}>
+              <div className="fg">
+                <label>
+                  {role === "admin" ? "Admin / committee username or email" : "Student ID or email"}
+                  <input className="in" name="username" autoComplete="username" required />
+                </label>
+                {role === "admin" && <label>
+                  Manage committee
+                  <select className="in" value={loginCommitteeId} onChange={(change) => setLoginCommitteeId(change.target.value)} required>
+                    {loginCommittees.map((committee) => <option key={committee.committee_id} value={committee.committee_id}>{committee.name}</option>)}
+                  </select>
+                </label>}
+                <label>
+                  Password
+                  <input className="in" name="password" type="password" autoComplete="current-password" required />
+                </label>
+              </div>
+              {error && <p className="auth-error" role="alert">{error}</p>}
+              <button className="btn" disabled={pending}>{pending ? "Signing in…" : "Sign in"}</button>
+            </form>
+            {role === "student" && <button className="btn g" type="button" onClick={() => { setCreating(true); setError(""); }}>Create a student account</button>}
+            {role === "admin" && <p className="note">Admin access is restricted to authorized accounts. Committee accounts sign in here and remain limited to their assigned committee.</p>}
+          </>
+        )}
+      </section>
+    </main>
+  );
+}
+
+export default function App(): React.JSX.Element {
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [orgs, setOrgs] = useState<Committee[]>([]);
+  const [depts, setDepts] = useState<Department[]>([]);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [regs, setRegs] = useState<StudentRegistration[]>([]);
+  const [adminRegistrations, setAdminRegistrations] = useState<StudentRegistration[]>([]);
+  const [allFeedback, setAllFeedback] = useState<FeedbackItem[]>([]);
+
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [managedCommitteeId, setManagedCommitteeId] = useState(() => localStorage.getItem("cp_managed_committee") || "");
+  const [authLoading, setAuthLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [active, setActive] = useState("");
   const [q, setQ] = useState<string>("");
   const [selectedOrgs, setSelectedOrgs] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -205,8 +304,14 @@ export default function App(): React.JSX.Element {
   const [paletteQuery, setPaletteQuery] = useState<string>("");
 
   // Registration section form state
-  const [regEventId, setRegEventId] = useState<number>(FALLBACK_EVENTS[0].event_id);
+  const [regEventId, setRegEventId] = useState<number>(0);
   const [feedbackRating, setFeedbackRating] = useState<number>(5);
+  const [paymentMethod, setPaymentMethod] = useState("UPI");
+  const [paymentReference, setPaymentReference] = useState("");
+  const [applicationAnswer, setApplicationAnswer] = useState("");
+  const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
+  const [editingCommittee, setEditingCommittee] = useState<Committee | null>(null);
+  const [registrationStep, setRegistrationStep] = useState<1 | 2>(1);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const cubeRef = useRef<HTMLDivElement | null>(null);
@@ -215,6 +320,48 @@ export default function App(): React.JSX.Element {
   const say = (m: string) => {
     setToast(m);
     setTimeout(() => setToast(""), 2600);
+  };
+
+  const signIn = async (role: "admin" | "student", username: string, password: string, committeeId?: string) => {
+    const result = await api<{ token: string; user: AuthUser }>("/auth/login", {
+      method: "POST",
+      body: { role, username, password }
+    });
+    setAuthToken(result.token);
+    setUser(result.user);
+    setActive(result.user.student_id || "");
+    const selected = result.user.role === "committee" ? result.user.committee_id : committeeId;
+    if (selected) {
+      localStorage.setItem("cp_managed_committee", selected);
+      setManagedCommitteeId(selected);
+    }
+  };
+
+  const registerStudent = async (details: StudentSignup) => {
+    const result = await api<{ token: string; user: AuthUser }>("/auth/register-student", {
+      method: "POST",
+      body: details
+    });
+    setAuthToken(result.token);
+    setUser(result.user);
+    setActive(result.user.student_id || "");
+  };
+
+  const signOut = async () => {
+    try {
+      await api("/auth/logout", { method: "POST" });
+    } catch (cause) {
+      say(cause instanceof Error ? cause.message : "Session ended locally.");
+    } finally {
+      setAuthToken(null);
+      setUser(null);
+      setActive("");
+      setRegs([]);
+      setAdminRegistrations([]);
+      setAllFeedback([]);
+      setAlerts(new Map());
+      setFollows(new Set());
+    }
   };
 
   const run = async (fn: () => Promise<any>, okMsg?: string) => {
@@ -228,49 +375,90 @@ export default function App(): React.JSX.Element {
   };
 
   const refresh = async () => {
+    if (!user) return;
+    setDataLoading(true);
+    setSyncError("");
     try {
-      const [evList, stuList, fbList, crList, dsList] = await Promise.all([
-        api<EventItem[]>("/events").catch(() => FALLBACK_EVENTS),
-        api<Student[]>("/students").catch(() => []),
-        api<FeedbackItem[]>("/feedback").catch(() => []),
-        api<CertificateItem[]>("/certificates").catch(() => []),
-        api<DeptSummary[]>("/dept-summary").catch(() => [])
+      const [evList, committeeList, departmentList, venueList, profile] = await Promise.all([
+        api<EventItem[]>("/events"),
+        api<Committee[]>("/committees"),
+        api<Department[]>("/departments"),
+        api<Venue[]>("/venues"),
+        user.role === "student" ? api<{ user: AuthUser }>("/auth/me") : Promise.resolve(null)
       ]);
+      if (profile) setUser(profile.user);
       setEvents(evList);
-      setStudents(stuList);
-      setAllFeedback(fbList);
-      setAllCerts(crList);
-      setDeptSummary(dsList);
-
-      if (active) {
-        const studentRegs = await api<StudentRegistration[]>(`/students/${active}/registrations`).catch(() => []);
+      setOrgs(committeeList);
+      setDepts(departmentList);
+      setVenues(venueList);
+      if (user.role === "admin" || user.role === "committee") {
+        const committeeId = user.role === "committee" ? user.committee_id : managedCommitteeId;
+        if (!committeeId) {
+          setAdminRegistrations([]);
+          setAllFeedback([]);
+          return;
+        }
+        const scope = `?committee_id=${encodeURIComponent(committeeId)}`;
+        const [fbList, registrationList] = await Promise.all([
+          api<FeedbackItem[]>(`/feedback${scope}`),
+          api<StudentRegistration[]>(`/admin/registrations${scope}`)
+        ]);
+        setAllFeedback(fbList);
+        setAdminRegistrations(registrationList);
+      } else if (user.role === "student" && user.student_id) {
+        const [studentRegs, fbList, followList, alertList] = await Promise.all([
+          api<StudentRegistration[]>(`/students/${encodeURIComponent(user.student_id)}/registrations`),
+          api<FeedbackItem[]>("/feedback"),
+          api<string[]>("/follows"),
+          api<{ event_id: number; set_at: string }[]>("/alerts")
+        ]);
         setRegs(studentRegs);
-      } else {
-        setRegs([]);
+        setAllFeedback(fbList);
+        setFollows(new Set(followList));
+        setAlerts(new Map(alertList.map((alert) => [alert.event_id, alert.set_at])));
+        setAdminRegistrations([]);
       }
-    } catch (e: any) {
-      console.warn("Sync warning:", e.message);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Could not load live CampusPulse data.";
+      setSyncError(message);
+      if (!localStorage.getItem("cp_auth_token")) void signOut();
+    } finally {
+      setDataLoading(false);
     }
   };
 
-  // Initial load
+  // Restore only a server-validated session; the browser never chooses a student identity.
   useEffect(() => {
-    api<Committee[]>("/committees").then(setOrgs).catch(() => setOrgs(FALLBACK_ORGS));
-    api<Department[]>("/departments").then(setDepts).catch(() => setDepts(FALLBACK_DEPTS));
-    refresh();
+    if (!localStorage.getItem("cp_auth_token")) {
+      setAuthLoading(false);
+      return;
+    }
+    api<{ user: AuthUser }>("/auth/me")
+      .then(({ user: restored }) => {
+        setUser(restored);
+        setActive(restored.student_id || "");
+        if (restored.role === "committee" && restored.committee_id) {
+          localStorage.setItem("cp_managed_committee", restored.committee_id);
+          setManagedCommitteeId(restored.committee_id);
+        }
+      })
+      .catch(() => setAuthToken(null))
+      .finally(() => setAuthLoading(false));
   }, []);
 
-  // When active student changes
   useEffect(() => {
-    localStorage.setItem("cp_active", active);
-    if (active) {
-      api<StudentRegistration[]>(`/students/${active}/registrations`)
-        .then(setRegs)
-        .catch(() => setRegs([]));
-    } else {
-      setRegs([]);
-    }
-  }, [active]);
+    if (!user) return;
+    void refresh();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, 30_000);
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [user, managedCommitteeId]);
 
   // Set up 3D Background Canvas animation
   useEffect(() => {
@@ -503,9 +691,9 @@ export default function App(): React.JSX.Element {
   }, [events, q, selectedOrgs, statusFilter, orgs]);
 
   const liveEvents = useMemo(() => events.filter((e) => e.status === "live"), [events]);
-  const me = students.find((s) => s.student_id === active);
+  const me = user?.role === "student" ? user : undefined;
+  const staffCommitteeId = user?.role === "committee" ? user.committee_id || "" : managedCommitteeId;
   const orgName = (id: string) => orgs.find((o) => o.committee_id === id)?.name || id;
-
   // Toggle Committee Filter Chip
   const toggleOrgChip = (orgId: string) => {
     setSelectedOrgs((prev) => {
@@ -518,33 +706,30 @@ export default function App(): React.JSX.Element {
 
   // Toggle Committee Follow
   const toggleFollow = (cid: string) => {
-    setFollows((prev) => {
-      const next = new Set(prev);
-      if (next.has(cid)) {
-        next.delete(cid);
-        say(`Unfollowed ${orgName(cid)}`);
-      } else {
-        next.add(cid);
-        say(`Following ${orgName(cid)}`);
-      }
-      return next;
-    });
+    if (user?.role !== "student") {
+      say("Sign in to the student portal to follow committees.");
+      return;
+    }
+    run(async () => {
+      await api("/follows", {
+        method: follows.has(cid) ? "DELETE" : "POST",
+        body: { committee_id: cid }
+      });
+    }, follows.has(cid) ? `Unfollowed ${orgName(cid)}` : `Following ${orgName(cid)}`);
   };
 
   // Toggle Event Alert
   const toggleAlert = (eid: number, ename: string) => {
-    setAlerts((prev) => {
-      const next = new Map(prev);
-      if (next.has(eid)) {
-        next.delete(eid);
-        say(`Alert removed for ${ename}`);
-      } else {
-        const timeStr = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-        next.set(eid, timeStr);
-        say(`Alert set · ${ename}`);
-      }
-      return next;
-    });
+    if (user?.role !== "student") {
+      say("Sign in to the student portal to set event alerts.");
+      return;
+    }
+    run(async () => {
+      await api("/alerts", {
+        method: alerts.has(eid) ? "DELETE" : "POST",
+        body: { event_id: eid }
+      });
+    }, alerts.has(eid) ? `Alert removed for ${ename}` : `Alert set · ${ename}`);
   };
 
   // Printable Certificate Pop-up
@@ -554,7 +739,13 @@ export default function App(): React.JSX.Element {
       say("Please allow pop-ups to print certificates");
       return;
     }
+    const escapeHtml = (value: string | number | null | undefined) => String(value ?? "").replace(
+      /[&<>"']/g,
+      (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character]!
+    );
     const certTitle = `CERT${1000 + (r.cert_id || r.reg_id)}`;
+    const studentName = me ? `${me.first_name} ${me.last_name}` : "Student";
+    const studentDetails = me ? `${me.student_id} · ${me.dept_id} · ${me.study_year} ${me.division}` : "";
     certWindow.document.write(`
       <!DOCTYPE html>
       <html>
@@ -583,14 +774,14 @@ export default function App(): React.JSX.Element {
         </div>
         <h1>CERTIFICATE OF PARTICIPATION</h1>
         <p class="p-lead">This certifies that</p>
-        <h2>${me ? me.first_name + " " + me.last_name : "Student"}</h2>
+        <h2>${escapeHtml(studentName)}</h2>
         <p style="font-size: 18px;">
-          (${me ? `${me.student_id} · ${me.dept_id} · ${me.study_year} ${me.division}` : ""})
+          (${escapeHtml(studentDetails)})
         </p>
         <p style="font-size: 18px; margin: 25px 0 10px;">successfully participated in</p>
-        <h2 style="font-size: 32px; font-style: normal; color: #111; margin: 10px 0;">${r.name}</h2>
+        <h2 style="font-size: 32px; font-style: normal; color: #111; margin: 10px 0;">${escapeHtml(r.name)}</h2>
         <p style="font-size: 16px; color: #555;">organised under SPIT committee events, Mumbai</p>
-        <p class="cert-no">Certificate ID: ${certTitle} · Date of Issue: ${r.issued_on || "October 2026"}</p>
+        <p class="cert-no">Certificate ID: ${certTitle} · Date of Issue: ${escapeHtml(r.issued_on || "Not recorded")}</p>
         <script>
           window.onload = function() { window.print(); }
         </script>
@@ -600,39 +791,102 @@ export default function App(): React.JSX.Element {
     certWindow.document.close();
   };
 
-  // Add Student Submission
-  const addStudent = (ev: React.FormEvent<HTMLFormElement>) => {
+  const saveEvent = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
     const form = ev.currentTarget;
-    const f = Object.fromEntries(new FormData(form)) as any;
+    const values = Object.fromEntries(new FormData(form)) as Record<string, string>;
+    const body = {
+      ...values,
+      capacity: values.capacity || null,
+      fee: values.fee || null,
+      start_ts: values.start_ts ? values.start_ts.replace("T", " ") : null,
+      end_ts: values.end_ts ? values.end_ts.replace("T", " ") : null,
+      registration_closes_at: values.registration_closes_at
+        ? values.registration_closes_at.replace("T", " ")
+        : null,
+      registration_open: values.registration_open === "on"
+    };
     run(async () => {
-      await api("/students", { method: "POST", body: f });
-      setActive(f.student_id);
+      await api(editingEvent ? `/admin/events/${editingEvent.event_id}` : "/admin/events", {
+        method: editingEvent ? "PUT" : "POST",
+        body
+      });
+      setEditingEvent(null);
       form.reset();
-    }, "Student profile added · now active");
+    }, editingEvent ? "Event registration settings updated" : "Event added");
+  };
+
+  const addCommittee = (ev: React.FormEvent<HTMLFormElement>) => {
+    ev.preventDefault();
+    const form = ev.currentTarget;
+    const values = Object.fromEntries(new FormData(form));
+    run(async () => {
+      await api(
+        editingCommittee ? `/admin/committees/${encodeURIComponent(editingCommittee.committee_id)}` : "/admin/committees",
+        { method: editingCommittee ? "PUT" : "POST", body: values }
+      );
+      setEditingCommittee(null);
+      form.reset();
+    }, editingCommittee ? "Committee updated" : "Committee added");
+  };
+
+  const addVenue = (ev: React.FormEvent<HTMLFormElement>) => {
+    ev.preventDefault();
+    const form = ev.currentTarget;
+    const values = Object.fromEntries(new FormData(form));
+    run(async () => {
+      await api("/admin/venues", { method: "POST", body: values });
+      form.reset();
+    }, "Venue added");
+  };
+
+  const addCommitteeAccount = (ev: React.FormEvent<HTMLFormElement>) => {
+    ev.preventDefault();
+    const form = ev.currentTarget;
+    const values = Object.fromEntries(new FormData(form));
+    run(async () => {
+      await api("/admin/accounts", { method: "POST", body: { ...values, role: "committee" } });
+      form.reset();
+    }, "Committee access enabled");
   };
 
   // Register for Event Submission
   const handleRegister = (ev: React.FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
-    if (!active) {
-      say("Select or add an active student first");
+    if (registrationStep === 1) {
+      setRegistrationStep(2);
+      return;
+    }
+    if (user?.role !== "student" || !active) {
+      say("Sign in to the student portal to register.");
       return;
     }
     const form = ev.currentTarget;
     const f = Object.fromEntries(new FormData(form)) as any;
-    const targetEvent = events.find((e) => e.event_id === regEventId) || sel;
+    const targetEvent = openEvents.find((e) => e.event_id === regEventId) || currentRegEvent || sel;
     if (!targetEvent) return;
+    const existingRegistration = regs.find((r) => r.committee_id === targetEvent.committee_id);
+    if (existingRegistration) {
+      say("You are already registered with this committee.");
+      return;
+    }
+    if (new Set(regs.map((r) => r.committee_id)).size >= 3) {
+      say("You can register with up to three committees.");
+      return;
+    }
 
     run(async () => {
       await api("/registrations", {
         method: "POST",
         body: {
-          student_id: active,
           event_id: targetEvent.event_id,
           ...f
         }
       });
+      setRegistrationStep(1);
+      setPaymentMethod("UPI");
+      setPaymentReference("");
+      setApplicationAnswer("");
       setSel(null);
     }, `Registered for ${targetEvent.name}`);
   };
@@ -682,14 +936,29 @@ export default function App(): React.JSX.Element {
     return regs.filter((r) => r.check_in && !r.rating);
   }, [regs]);
 
-  const currentRegEvent = events.find((e) => e.event_id === regEventId) || events[0];
+  const openEvents = events.filter((event) => {
+    const registrationOpen = registrationState(event) === "Open";
+    const eligible = !event.eligible_dept_id ||
+      (Boolean(me?.department_verified) && event.eligible_dept_id === me?.dept_id);
+    const registeredWithCommittee = regs.some((registration) => registration.committee_id === event.committee_id);
+    return registrationOpen && eligible && !registeredWithCommittee;
+  });
+  const currentRegEvent = openEvents.find((e) => e.event_id === regEventId) || openEvents[0];
+  const registrationDisplayState = (event: EventItem) =>
+    user?.role === "student" && regs.some((registration) => registration.committee_id === event.committee_id)
+      ? "Registered" : registrationState(event);
+
+  if (authLoading) {
+    return <main className="auth-shell"><p className="mu">Restoring your secure session…</p></main>;
+  }
+  if (!user) return <SignIn onSignedIn={signIn} onRegister={registerStudent} />;
 
   return (
     <>
       <canvas id="bg" ref={canvasRef} aria-hidden="true" />
 
       {/* Main Navigation */}
-      <nav>
+      <nav className={user.role === "student" ? "student-nav" : "staff-nav"}>
         <div className="w">
           <span className="logo">
             CAMPUS<em>PULSE</em>
@@ -699,26 +968,46 @@ export default function App(): React.JSX.Element {
           <a href="#week">7 Days</a>
           <a href="#committees">Committees</a>
           <a href="#register">Register</a>
-          <a href="#students">Students</a>
-          <a href="#departments">Departments</a>
-          <a href="#certificates">Certificates</a>
+          {user.role === "admin" && <a href="#event-admin">Manage</a>}
+          {user.role !== "student" && <a href="#committee-dashboard">Committee roster</a>}
+          {user.role === "student" && <a href="#certificates">Certificates</a>}
           <a href="#feedback">Feedback</a>
 
-          <button className="btn g m" onClick={() => setPaletteOpen(true)} title="Command palette">
-            Ctrl K
-          </button>
-          <button className="btn" onClick={() => setDrawerOpen(true)}>
+          <span className="m portal-badge">{user.role === "committee" ? "COMMITTEE ADMIN" : user.role.toUpperCase()} · {user.username}</span>
+          {user.role === "admin" && <label className="nav-scope">
+            Committee
+            <select
+              className="in"
+              aria-label="Choose committee scope"
+              value={managedCommitteeId}
+              onChange={(event) => {
+                localStorage.setItem("cp_managed_committee", event.target.value);
+                setAllFeedback([]);
+                setAdminRegistrations([]);
+                setManagedCommitteeId(event.target.value);
+              }}
+            >
+              {orgs.map((committee) => <option key={committee.committee_id} value={committee.committee_id}>{committee.name}</option>)}
+            </select>
+          </label>}
+          {user.role === "student" && <button className="btn g" onClick={() => setDrawerOpen(true)}>
             Alerts <span id="ac">{alerts.size + follows.size}</span>
-          </button>
-          <button
-            className="btn g s"
-            style={{ marginLeft: 6 }}
-            onClick={() => run(() => api("/admin/issue-certificates", { method: "POST" }), "Certificates issued")}
-          >
-            Issue certificates
-          </button>
+          </button>}
+          {user.role !== "student" && <button className="btn g s" disabled={!staffCommitteeId} onClick={() => run(async () => {
+            const result = await api<{ issued: number }>("/admin/issue-certificates", {
+              method: "POST", body: { committee_id: staffCommitteeId }
+            });
+            say(`${result.issued} eligible certificate${result.issued === 1 ? "" : "s"} issued`);
+          })}>
+            Issue eligible certificates
+          </button>}
+          <button className="btn g s" onClick={() => void signOut()}>Sign out</button>
         </div>
       </nav>
+
+      {syncError && <div className="w"><p className="auth-error" role="alert">{syncError}</p>
+        <button className="btn g s" onClick={() => refresh()}>Retry data sync</button></div>}
+      {dataLoading && <div className="w"><p className="note" role="status">Loading the latest CampusPulse data…</p></div>}
 
       {/* Hero Header */}
       <div className="w">
@@ -774,8 +1063,8 @@ export default function App(): React.JSX.Element {
             <span>committees</span>
           </div>
           <div>
-            <b>{students.length}</b>
-            <span>students on CampusPulse</span>
+            <b>{user.role === "student" ? regs.length : adminRegistrations.length}</b>
+            <span>{user.role === "student" ? "your registrations" : "committee registrations"}</span>
           </div>
         </div>
       </div>
@@ -829,7 +1118,8 @@ export default function App(): React.JSX.Element {
                   </p>
                   <div className="bt">
                     <span className="m">{e.registered || 0} registered</span>
-                    <button
+                    <span className={"b " + (registrationDisplayState(e) === "Open" || registrationDisplayState(e) === "Registered" ? "ok" : "no")}>{registrationDisplayState(e)}</span>
+                    {user.role === "student" && <button
                       className="nb"
                       aria-pressed={alerts.has(e.event_id)}
                       onClick={(ev) => {
@@ -839,7 +1129,7 @@ export default function App(): React.JSX.Element {
                       title="Alert me for this event"
                     >
                       🔔
-                    </button>
+                    </button>}
                   </div>
                 </article>
               ))
@@ -918,8 +1208,12 @@ export default function App(): React.JSX.Element {
                   {feeText(e)}
                 </p>
                 <div className="bt">
-                  <span className="m">{e.registered || 0} registered</span>
-                  {e.status !== "done" && (
+                  <span className="m">
+                    {e.registered || 0} registered
+                    {e.capacity != null && ` · ${e.remaining ?? 0} seats left`}
+                  </span>
+                  <span className={"b " + (registrationDisplayState(e) === "Open" || registrationDisplayState(e) === "Registered" ? "ok" : "no")}>{registrationDisplayState(e)}</span>
+                  {user.role === "student" && e.status !== "done" && (
                     <button
                       className="nb"
                       aria-pressed={alerts.has(e.event_id)}
@@ -935,6 +1229,7 @@ export default function App(): React.JSX.Element {
                 </div>
               </article>
             ))}
+            {shown.length === 0 && <p className="em">{dataLoading ? "Loading events…" : "No events match these filters."}</p>}
           </div>
         </section>
 
@@ -1033,34 +1328,71 @@ export default function App(): React.JSX.Element {
         <section id="register">
           <div className="sh">
             <div>
-              <h2>Registration &amp; payment</h2>
-              <p>Register as the active student, record your payment reference, and track attendance.</p>
+              <h2>Committee registration</h2>
+              <p>Choose an eligible committee, review your application, and submit securely. Up to three committees per student.</p>
             </div>
             <span className="m mu">
               {me
-                ? `Active student: ${me.first_name} ${me.last_name} · ${me.student_id}`
-                : "No active student"}
+                ? `${me.first_name} ${me.last_name} · ${me.student_id} · ${me.department_verified ? `Verified ${me.dept_id}` : `Self-reported ${me.dept_id} · verification pending`}`
+                : "Student applications"}
             </span>
           </div>
 
           <div className="panel pad">
-            {me ? (
+            {user.role === "student" && me ? (
               <form onSubmit={handleRegister}>
-                <div className="fg">
+                <div className="ctl">
+                  <span className={"b " + (registrationStep === 1 ? "ok" : "")}>1 · Select</span>
+                  <span className={"b " + (registrationStep === 2 ? "ok" : "")}>2 · Review &amp; submit</span>
+                  <span className="m mu">{new Set(regs.map((r) => r.committee_id)).size} of 3 committees selected</span>
+                </div>
+                {openEvents.length === 0 ? (
+                  <p className="em">
+                    No eligible registrations are open right now. All matching committees may be full, closed, completed, or already registered.
+                  </p>
+                ) : (
+                  <>
+                    {registrationStep === 1 ? (
+                      <div className="fg">
                   <label>
-                    Event
+                    Committee / event
                     <select
                       className="in"
-                      value={regEventId}
-                      onChange={(e) => setRegEventId(+e.target.value)}
+                      value={regEventId || openEvents[0].event_id}
+                      onChange={(e) => {
+                        setRegEventId(+e.target.value);
+                        setRegistrationStep(1);
+                        setPaymentReference("");
+                        setPaymentMethod("UPI");
+                        setApplicationAnswer("");
+                      }}
                     >
-                      {events.map((x) => (
+                      {openEvents.map((x) => (
                         <option key={x.event_id} value={x.event_id}>
-                          {x.name} · {orgName(x.committee_id)}
-                          {x.status === "done" ? " (completed)" : ""}
+                          {orgName(x.committee_id)} · {x.name}
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label>
+                    Venue
+                    <div className="in" style={{ background: "var(--card2)" }}>
+                      {currentRegEvent?.venue || "To be announced"}
+                    </div>
+                  </label>
+                  <label>
+                    Capacity
+                    <div className="in" style={{ background: "var(--card2)" }}>
+                      {currentRegEvent?.capacity == null
+                        ? `${currentRegEvent?.registered || 0} registered · unlimited`
+                        : `${currentRegEvent.registered || 0} / ${currentRegEvent.capacity} registered · ${currentRegEvent.remaining} seats left`}
+                    </div>
+                  </label>
+                  <label>
+                    Eligibility
+                    <div className="in" style={{ background: "var(--card2)" }}>
+                      {currentRegEvent?.eligible_dept_id || "All verified departments"}
+                    </div>
                   </label>
                   <label>
                     Fee
@@ -1072,7 +1404,7 @@ export default function App(): React.JSX.Element {
                     <>
                       <label>
                         Payment method
-                        <select className="in" name="method">
+                        <select className="in" name="method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
                           <option>UPI</option>
                           <option>Card</option>
                           <option>Cash</option>
@@ -1084,44 +1416,73 @@ export default function App(): React.JSX.Element {
                           className="in"
                           name="txn_ref"
                           placeholder="UPI ref / receipt no."
+                          value={paymentReference}
+                          onChange={(event) => setPaymentReference(event.target.value)}
                           required
                         />
                       </label>
                     </>
                   )}
-                </div>
-                <div className="ctl" style={{ margin: 0 }}>
-                  <button className="btn">
-                    Register {me.first_name}
-                  </button>
-                  {currentRegEvent?.links?.map((l) => (
-                    <a
-                      key={l.link_id}
-                      className="btn g s"
-                      href={l.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {l.label} ↗
-                    </a>
-                  ))}
-                </div>
-                <p className="note" style={{ marginTop: 12 }}>
-                  Completed events can be logged too, for record-keeping. Payments are stored as "Submitted" until a committee member verifies the reference.
-                </p>
+                  {currentRegEvent?.registration_question && <label className="wide-field">
+                    {currentRegEvent.registration_question}
+                    <textarea className="in" name="application_answer" rows={3} maxLength={2000} value={applicationAnswer}
+                      onChange={(event) => setApplicationAnswer(event.target.value)} required />
+                  </label>}
+                        </div>
+                    ) : (
+                        <div className="registration-review">
+                          <span className="m mu">APPLICATION REVIEW</span>
+                          <h3>{orgName(currentRegEvent.committee_id)}</h3>
+                          <p>{currentRegEvent.name}</p>
+                          <p className="mu">{currentRegEvent.description || "Committee application"}</p>
+                          <dl className="kv">
+                            <div><dt>Student</dt><dd>{me.first_name} {me.last_name} · {me.student_id}</dd></div>
+                            <div><dt>Department</dt><dd>{me.dept_id} · {me.department_verified ? "Verified" : "Pending verification"}</dd></div>
+                            <div><dt>Venue</dt><dd>{currentRegEvent.venue || "To be announced"}</dd></div>
+                            <div><dt>Registration availability</dt><dd>{currentRegEvent.remaining == null ? "Open" : `${currentRegEvent.remaining} seats remaining`}</dd></div>
+                          </dl>
+                          {(currentRegEvent.fee || 0) > 0 && <div className="fg">
+                            <label>Payment method
+                              <select className="in" name="method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+                                <option>UPI</option><option>Card</option><option>Cash</option>
+                              </select>
+                            </label>
+                            <label>Payment reference
+                              <input className="in" name="txn_ref" minLength={6} maxLength={60} value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} required />
+                            </label>
+                          </div>}
+                          {currentRegEvent.registration_question && <label>
+                            {currentRegEvent.registration_question}
+                            <textarea className="in" name="application_answer" rows={3} maxLength={2000} value={applicationAnswer}
+                              onChange={(event) => setApplicationAnswer(event.target.value)} required />
+                          </label>}
+                          <label className="consent">
+                            <input type="checkbox" required />
+                            I confirm my student details and agree to submit this registration.
+                          </label>
+                        </div>
+                    )}
+                    <div className="ctl" style={{ margin: 0 }}>
+                        {registrationStep === 2 && <button type="button" className="btn g" onClick={() => setRegistrationStep(1)}>Back</button>}
+                        <button className="btn" disabled={dataLoading || (registrationStep === 1 && !currentRegEvent)}>
+                          {registrationStep === 1 ? "Review application" : "Confirm registration"}
+                        </button>
+                    </div>
+                    <p className="note" style={{ marginTop: 12 }}>
+                        Availability is checked again by the server during submission. Payment references are recorded as pending verification.
+                    </p>
+                  </>
+                )}
               </form>
             ) : (
               <p className="em">
-                Add a student profile first, then come back to register.{" "}
-                <a href="#students" style={{ color: "var(--or2)" }}>
-                  Go to Students →
-                </a>
+                Committee applications are available to signed-in students. Your verified department is read from the student record.
               </p>
             )}
           </div>
 
           {/* Registrations List */}
-          <div className="panel ow" style={{ marginTop: 16 }}>
+          {user.role === "student" && <div className="panel ow" style={{ marginTop: 16 }}>
             <h4 style={{ padding: "18px 0 10px", fontSize: 24 }}>My Registrations</h4>
             <table className="tb">
               <thead>
@@ -1143,7 +1504,8 @@ export default function App(): React.JSX.Element {
                       <td>{r.name}</td>
                       <td>{r.registered_on}</td>
                       <td>
-                        <span className="b ok">{r.event_status}</span>
+                        <span className={"b " + (r.registration_status === "Cancelled" ? "no" : "ok")}>{r.registration_status || "Confirmed"}</span>
+                        <small className="sub-status">{r.event_status}</small>
                       </td>
                       <td>
                         {r.pay_status ? (
@@ -1156,7 +1518,7 @@ export default function App(): React.JSX.Element {
                       </td>
                       <td>
                         {r.check_in ? (
-                          <>
+                          user.role === "admin" ? <>
                             <span className="b ok">Present</span>{" "}
                             {!r.check_out && (
                               <button
@@ -1175,9 +1537,9 @@ export default function App(): React.JSX.Element {
                                 Check out
                               </button>
                             )}
-                          </>
+                          </> : <span className="b ok">Present</span>
                         ) : (
-                          <button
+                          user.role === "admin" ? <button
                             className="btn g s"
                             onClick={() =>
                               run(
@@ -1191,7 +1553,7 @@ export default function App(): React.JSX.Element {
                             }
                           >
                             Check in
-                          </button>
+                          </button> : <span className="b wait">Awaiting event check-in</span>
                         )}
                       </td>
                       <td>
@@ -1214,182 +1576,160 @@ export default function App(): React.JSX.Element {
                 )}
               </tbody>
             </table>
-          </div>
+          </div>}
         </section>
 
-        {/* Section 6: Students */}
-        <section id="students">
+        {user.role !== "student" && <section id="committee-dashboard">
           <div className="sh">
             <div>
-              <h2>Students</h2>
-              <p>Add a profile, then choose the active student.</p>
+              <h2>{user.role === "committee" ? `${orgName(staffCommitteeId)} roster` : "Committee registrations"}</h2>
+              <p>Student applications and feedback are limited to the selected committee. Cancelled registrations stay in the database for history.</p>
             </div>
+            {user.role === "committee" && <span className="b ok">{orgName(staffCommitteeId)}</span>}
           </div>
-
-          <form className="panel pad" onSubmit={addStudent}>
-            <div className="fg">
-              <label>
-                Student ID
-                <input className="in" name="student_id" placeholder="UID / Roll no." required />
-              </label>
-              <label>
-                First name
-                <input className="in" name="first_name" required />
-              </label>
-              <label>
-                Last name
-                <input className="in" name="last_name" required />
-              </label>
-              <label>
-                Department
-                <select className="in" name="dept_id">
-                  {depts.map((d) => (
-                    <option key={d.dept_id} value={d.dept_id}>
-                      {d.dept_id} · {d.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Year
-                <select className="in" name="study_year">
-                  <option>FE</option>
-                  <option>SE</option>
-                  <option>TE</option>
-                  <option>BE</option>
-                </select>
-              </label>
-              <label>
-                Division
-                <input className="in" name="division" placeholder="A" required />
-              </label>
-              <label>
-                Phone
-                <input className="in" name="phone" inputMode="tel" />
-              </label>
-              <label>
-                Email
-                <input className="in" name="email" type="email" />
-              </label>
-              <label>
-                Gender
-                <select className="in" name="gender">
-                  <option>Female</option>
-                  <option>Male</option>
-                  <option>Other</option>
-                </select>
-              </label>
-              <label>
-                Date of birth
-                <input className="in" name="dob" type="date" />
-              </label>
-            </div>
-            <button className="btn">Add student</button>
-          </form>
-
-          <div className="panel ow">
-            <table className="tb">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Name</th>
-                  <th>Dept</th>
-                  <th>Year · Div</th>
-                  <th>Registered / Attended</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {students.map((s) => (
-                  <tr key={s.student_id}>
-                    <td>{s.student_id}</td>
-                    <td>
-                      {s.first_name} {s.last_name}
+          {!staffCommitteeId ? (
+            <p className="em">Select a committee to view its applications.</p>
+          ) : (
+            <div className="panel ow">
+              <table className="tb">
+                <thead><tr><th>Student</th><th>Branch / contact</th><th>Event</th><th>Registered</th><th>Application</th><th>Payment</th><th>Attendance</th><th>Certificate</th><th>Actions</th></tr></thead>
+                <tbody>{adminRegistrations.map((registration) => (
+                  <tr key={registration.reg_id}>
+                    <td>{registration.first_name} {registration.last_name}<small className="sub-status">{registration.student_id}</small></td>
+                    <td>{registration.dept_id || "—"} · {registration.department_verified ? "Verified" : "Pending"}
+                      <small className="sub-status">{registration.email || "No email"}{registration.phone ? ` · ${registration.phone}` : ""}</small>
                     </td>
-                    <td>{s.dept_id}</td>
+                    <td>{registration.name}</td>
+                    <td>{registration.registered_on}<small className="sub-status">{registration.registration_status}</small></td>
+                    <td>{registration.application_answer || "—"}</td>
+                    <td>{registration.pay_status || "—"}{registration.amount != null && ` · ₹${registration.amount}`}</td>
+                    <td>{registration.check_in ? "Checked in" : "Not checked in"}{registration.check_out && " · Checked out"}</td>
+                    <td>{registration.cert_id ? <span className="b ok">CERT{1000 + registration.cert_id}</span> : "Not yet eligible"}</td>
                     <td>
-                      {s.study_year} · {s.division}
-                    </td>
-                    <td>
-                      {s.reg_count || 0} / {s.att_count || 0}
-                    </td>
-                    <td>
-                      {active === s.student_id ? (
-                        <span className="b ok">Active</span>
-                      ) : (
-                        <button className="btn g s" onClick={() => setActive(s.student_id)}>
-                          Use
-                        </button>
-                      )}{" "}
-                      <button
-                        className="btn g s"
-                        onClick={() =>
-                          run(async () => {
-                            await api(`/students/${s.student_id}`, { method: "DELETE" });
-                            if (active === s.student_id) setActive("");
-                          }, "Student removed")
-                        }
-                      >
-                        Remove
-                      </button>
+                      {registration.registration_status === "Confirmed" && <>
+                        {!registration.check_in ? <button className="btn g s" onClick={() => run(
+                          () => api("/attendance/check-in", { method: "POST", body: { reg_id: registration.reg_id, committee_id: staffCommitteeId } }),
+                          "Student checked in"
+                        )}>Check in</button> : !registration.check_out && <button className="btn g s" onClick={() => run(
+                          () => api("/attendance/check-out", { method: "POST", body: { reg_id: registration.reg_id, committee_id: staffCommitteeId } }),
+                          "Student checked out"
+                        )}>Check out</button>}
+                        <button className="btn g s" onClick={() => {
+                          if (window.confirm(`Cancel ${registration.first_name} ${registration.last_name}'s registration for ${registration.name}? Their student account and history will be preserved.`)) {
+                            void run(
+                              () => api(`/admin/registrations/${registration.reg_id}?committee_id=${encodeURIComponent(staffCommitteeId)}`, { method: "DELETE" }),
+                              "Committee registration cancelled; history preserved"
+                            );
+                          }
+                        }}>Cancel registration</button>
+                      </>}
                     </td>
                   </tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                {adminRegistrations.length === 0 && <tr><td colSpan={9} className="mu">No applications for {orgName(staffCommitteeId)} yet.</td></tr>}</tbody>
+              </table>
+            </div>
+          )}
+        </section>}
 
-        {/* Section 7: Student Departments Analytics */}
-        <section id="departments">
+        <section id="event-admin" hidden={user.role !== "admin"}>
           <div className="sh">
             <div>
-              <h2>Student departments</h2>
-              <p>Students, registrations, attendance and certificates by department.</p>
+              <h2>Event &amp; committee setup</h2>
+              <p>Manage live catalog data, venues, registration windows, eligibility and seat limits.</p>
             </div>
           </div>
-          <div className="grid">
-            {depts.map((d) => {
-              const deptStudents = students.filter((s) => s.dept_id === d.dept_id);
-              const summary = deptSummary.find((ds) => ds.dept_id === d.dept_id);
-              return (
-                <div key={d.dept_id} className="cm dp">
-                  <span className="m mu">{d.dept_id}</span>
-                  <h3>{d.dept_id}</h3>
-                  <p>{d.name}</p>
-                  <dl>
-                    <div>
-                      <dt>Students</dt>
-                      <dd>{summary?.students ?? deptStudents.length}</dd>
-                    </div>
-                    <div>
-                      <dt>Attended</dt>
-                      <dd>{summary?.attended ?? 0}</dd>
-                    </div>
-                    <div>
-                      <dt>Certs</dt>
-                      <dd>{summary?.certs ?? 0}</dd>
-                    </div>
-                  </dl>
-                  <div className="chips">
-                    {deptStudents.length > 0 ? (
-                      deptStudents.map((s) => (
-                        <span key={s.student_id} className="tag">
-                          {s.first_name} {s.last_name} · {s.study_year}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="m mu">No students enrolled yet</span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+          <form key={editingEvent?.event_id || "new-event"} className="panel pad" onSubmit={saveEvent}>
+            <h3>{editingEvent ? `Edit: ${editingEvent.name}` : "Create an event"}</h3>
+            <div className="fg">
+              <label>Event name<input className="in" name="name" defaultValue={editingEvent?.name} maxLength={150} required /></label>
+              <label>Committee<select className="in" name="committee_id" defaultValue={editingEvent?.committee_id || orgs[0]?.committee_id} required>
+                {orgs.map((committee) => <option key={committee.committee_id} value={committee.committee_id}>{committee.name}</option>)}
+              </select></label>
+              <label>Venue<select className="in" name="venue_id" defaultValue={editingEvent?.venue_id || ""}>
+                <option value="">To be announced / online</option>
+                {venues.map((venue) => <option key={venue.venue_id} value={venue.venue_id}>{venue.name}</option>)}
+              </select></label>
+              <label>Capacity (leave blank for unlimited)<input className="in" name="capacity" type="number" min={1} step={1} defaultValue={editingEvent?.capacity ?? ""} /></label>
+              <label>Registration closes<input className="in" name="registration_closes_at" type="datetime-local" defaultValue={editingEvent?.registration_closes_at?.replace(" ", "T").slice(0, 16) || ""} /></label>
+              <label>Eligible department (optional)<select className="in" name="eligible_dept_id" defaultValue={editingEvent?.eligible_dept_id || ""}>
+                <option value="">All verified departments</option>
+                {depts.map((department) => <option key={department.dept_id} value={department.dept_id}>{department.dept_id} · {department.name}</option>)}
+              </select></label>
+              <label>Starts<input className="in" name="start_ts" type="datetime-local" defaultValue={editingEvent?.start_ts?.replace(" ", "T").slice(0, 16) || ""} /></label>
+              <label>Ends<input className="in" name="end_ts" type="datetime-local" defaultValue={editingEvent?.end_ts?.replace(" ", "T").slice(0, 16) || ""} /></label>
+              <label>Fee<input className="in" name="fee" type="number" min={0} step="0.01" defaultValue={editingEvent?.fee ?? ""} /></label>
+              <label>Fee note<input className="in" name="fee_note" defaultValue={editingEvent?.fee_note || ""} maxLength={80} /></label>
+              <label>Audience / eligibility notes<input className="in" name="audience" defaultValue={editingEvent?.audience || ""} maxLength={60} /></label>
+              <label>Required application question (optional)<input className="in" name="registration_question" defaultValue={editingEvent?.registration_question || ""} maxLength={500} /></label>
+              <label>Prize<input className="in" name="prize" defaultValue={editingEvent?.prize || ""} maxLength={40} /></label>
+              <label className="wide-field">Description<textarea className="in" name="description" rows={3} defaultValue={editingEvent?.description || ""} /></label>
+              <label className="consent"><input type="checkbox" name="registration_open" defaultChecked={editingEvent ? Boolean(editingEvent.registration_open) : true} /> Registration is open</label>
+            </div>
+            {editingEvent?.capacity != null && <p className="note">Currently {editingEvent.registered || 0} confirmed · {editingEvent.remaining ?? 0} seats remaining. Capacity cannot be reduced below confirmed registrations.</p>}
+            <button className="btn">{editingEvent ? "Save event settings" : "Create event"}</button>
+            {editingEvent && <button type="button" className="btn g" onClick={() => setEditingEvent(null)}>Cancel edit</button>}
+          </form>
+          <div className="panel ow">
+            <table className="tb">
+              <thead><tr><th>Event</th><th>Committee</th><th>Venue</th><th>Registered / capacity</th><th>Registration</th><th>Action</th></tr></thead>
+              <tbody>{events.map((event) => (
+                <tr key={event.event_id}>
+                  <td>{event.name}</td><td>{orgName(event.committee_id)}</td><td>{event.venue || "—"}</td>
+                  <td>{event.registered || 0} / {event.capacity ?? "Unlimited"}{event.remaining != null && ` · ${event.remaining} left`}</td>
+                  <td><span className={"b " + (registrationState(event) === "Open" ? "ok" : "no")}>{registrationState(event)}</span></td>
+                  <td><button className="btn g s" onClick={() => setEditingEvent(event)}>Edit</button></td>
+                </tr>
+              ))}</tbody>
+            </table>
           </div>
+          <div className="two">
+            <form key={editingCommittee?.committee_id || "new-committee"} className="panel pad" onSubmit={addCommittee}>
+              <h3>{editingCommittee ? `Edit ${editingCommittee.name}` : "Add committee"}</h3>
+              <div className="fg">
+                <label>Committee ID<input className="in" name="committee_id" maxLength={15} defaultValue={editingCommittee?.committee_id} readOnly={Boolean(editingCommittee)} required /></label>
+                <label>Name<input className="in" name="name" maxLength={80} defaultValue={editingCommittee?.name} required /></label>
+                <label>Tagline<input className="in" name="tagline" maxLength={120} defaultValue={editingCommittee?.tagline || ""} /></label>
+                <label>Instagram handle<input className="in" name="instagram_handle" maxLength={60} defaultValue={editingCommittee?.instagram_handle || ""} /></label>
+              </div>
+              <button className="btn">{editingCommittee ? "Save committee" : "Add committee"}</button>
+              {editingCommittee && <button type="button" className="btn g" onClick={() => setEditingCommittee(null)}>Cancel edit</button>}
+            </form>
+            <form className="panel pad" onSubmit={addVenue}>
+              <h3>Add venue</h3>
+              <div className="fg">
+                <label>Venue ID<input className="in" name="venue_id" maxLength={15} required /></label>
+                <label>Venue name<input className="in" name="name" maxLength={100} required /></label>
+              </div>
+              <button className="btn">Add venue</button>
+            </form>
+          </div>
+          <div className="panel ow">
+            <table className="tb">
+              <thead><tr><th>Committee</th><th>ID</th><th>Tagline</th><th>Action</th></tr></thead>
+              <tbody>{orgs.map((committee) => <tr key={committee.committee_id}>
+                <td>{committee.name}</td><td>{committee.committee_id}</td><td>{committee.tagline || "—"}</td>
+                <td><button className="btn g s" onClick={() => setEditingCommittee(committee)}>Edit</button></td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+          <form className="panel pad" onSubmit={addCommitteeAccount}>
+            <h3>Grant committee feedback access</h3>
+            <p className="note">Committee accounts can only read feedback for their assigned committee.</p>
+            <div className="fg">
+              <label>Login username<input className="in" name="username" maxLength={120} autoComplete="off" required /></label>
+              <label>Student ID<input className="in" name="student_id" maxLength={20} required /></label>
+              <label>Committee<select className="in" name="committee_id" required>
+                {orgs.map((committee) => <option key={committee.committee_id} value={committee.committee_id}>{committee.name}</option>)}
+              </select></label>
+              <label>Temporary password (12+ characters)<input className="in" name="password" type="password" minLength={12} autoComplete="new-password" required /></label>
+            </div>
+            <button className="btn">Create committee account</button>
+          </form>
         </section>
 
         {/* Section 8: Certificates */}
-        <section id="certificates">
+        <section id="certificates" hidden={user.role !== "student"}>
           <div className="sh">
             <div>
               <h2>Certificates</h2>
@@ -1482,7 +1822,7 @@ export default function App(): React.JSX.Element {
           </div>
 
           <div className="panel pad">
-            {eligibleFeedbackRegs.length > 0 ? (
+            {user.role === "student" && eligibleFeedbackRegs.length > 0 ? (
               <form onSubmit={handleFeedback}>
                 <div className="fg">
                   <label>
@@ -1517,6 +1857,8 @@ export default function App(): React.JSX.Element {
                 </div>
                 <button className="btn">Submit feedback</button>
               </form>
+            ) : user.role !== "student" ? (
+              <p className="em">Student feedback submission is available only in the student portal. This view shows feedback for {orgName(staffCommitteeId)} only.</p>
             ) : (
               <p className="em">
                 {me
