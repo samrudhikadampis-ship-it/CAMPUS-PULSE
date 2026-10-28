@@ -67,26 +67,35 @@ interface AuthUser {
   department_verified?: boolean | number;
 }
 
-type StudentSignup = Record<string, string | number>;
+interface StudentSignup {
+  first_name: string;
+  last_name: string;
+  email: string;
+  password: string;
+}
+
+interface AdminSignup extends StudentSignup {
+  committee_id: string;
+}
 
 function SignIn({
   onSignedIn,
-  onRegister
+  onRegister,
+  onAdminRegister
 }: {
   onSignedIn: (role: "admin" | "student", username: string, password: string, committeeId?: string) => Promise<void>;
   onRegister: (details: StudentSignup) => Promise<void>;
+  onAdminRegister: (details: AdminSignup) => Promise<void>;
 }): React.JSX.Element {
   const [role, setRole] = useState<"admin" | "student">("student");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [pending, setPending] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [committees, setCommittees] = useState<Committee[]>([]);
-  const [events, setEvents] = useState<EventItem[]>([]);
   const [loginCommittees, setLoginCommittees] = useState<Committee[]>([]);
   const [loginCommitteeId, setLoginCommitteeId] = useState("");
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [selectedEventId, setSelectedEventId] = useState("");
+  const [committeesLoading, setCommitteesLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   useEffect(() => {
     if (role !== "admin") return;
@@ -103,32 +112,21 @@ function SignIn({
   }, [role]);
 
   useEffect(() => {
-    if (!creating) return;
+    if (!creating || role !== "admin") return;
     let mounted = true;
-    setCatalogLoading(true);
-    Promise.all([
-      api<Department[]>("/departments"),
-      api<Committee[]>("/committees"),
-      api<EventItem[]>("/events")
-    ]).then(([deptList, committeeList, eventList]) => {
+    setCommitteesLoading(true);
+    api<Committee[]>("/committees").then((committeeList) => {
       if (!mounted) return;
-      setDepartments(deptList);
-      setCommittees(committeeList);
-      const options = eventList.filter((event) =>
-        registrationState(event) === "Open" && !event.eligible_dept_id
-      );
-      setEvents(options);
-      if (options.length) setSelectedEventId(String(options[0].event_id));
+      setLoginCommittees(committeeList);
+      setLoginCommitteeId(committeeList[0]?.committee_id || "");
       setError("");
     }).catch((cause: unknown) => {
-      if (mounted) setError(cause instanceof Error ? cause.message : "Unable to load registration options.");
+      if (mounted) setError(cause instanceof Error ? cause.message : "Unable to load committees.");
     }).finally(() => {
-      if (mounted) setCatalogLoading(false);
+      if (mounted) setCommitteesLoading(false);
     });
     return () => { mounted = false; };
-  }, [creating]);
-
-  const selectedEvent = events.find((event) => String(event.event_id) === selectedEventId);
+  }, [creating, role]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -151,32 +149,24 @@ function SignIn({
 
   const submitRegistration = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!selectedEvent) {
-      setError("Choose an available committee event.");
-      return;
-    }
     const values = new FormData(event.currentTarget);
     setPending(true);
     setError("");
+    setNotice("");
     try {
       const details: StudentSignup = {
-        student_id: String(values.get("student_id") || ""),
-        first_name: String(values.get("first_name") || ""),
-        last_name: String(values.get("last_name") || ""),
-        dept_id: String(values.get("dept_id") || ""),
-        study_year: String(values.get("study_year") || ""),
-        division: String(values.get("division") || ""),
-        email: String(values.get("email") || ""),
-        phone: String(values.get("phone") || ""),
-        gender: String(values.get("gender") || ""),
-        dob: String(values.get("dob") || ""),
-        password: String(values.get("password") || ""),
-        event_id: Number(selectedEvent.event_id),
-        application_answer: String(values.get("application_answer") || ""),
-        txn_ref: String(values.get("txn_ref") || ""),
-        method: String(values.get("method") || "UPI")
+        first_name: String(values.get("first_name") || "").trim(),
+        last_name: String(values.get("last_name") || "").trim(),
+        email: String(values.get("email") || "").trim(),
+        password: String(values.get("password") || "")
       };
-      await onRegister(details);
+      if (role === "student") {
+        await onRegister(details);
+      } else {
+        await onAdminRegister({ ...details, committee_id: String(values.get("committee_id") || "") });
+        setNotice("Your admin request was sent for approval. You can sign in after a superadmin approves it.");
+        setCreating(false);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to complete registration.");
     } finally {
@@ -189,11 +179,11 @@ function SignIn({
       <section className="auth-card panel pad">
         <span className="logo">CAMPUS<em>PULSE</em></span>
         <h1>{role === "admin" ? "Admin portal" : "Student portal"}</h1>
-        <p className="mu">{creating ? "Create your student profile and apply to a committee in one step." : "Sign in with your CampusPulse account to continue."}</p>
+        <p className="mu">{creating ? `Create a ${role} account to continue.` : "Sign in with your CampusPulse account to continue."}</p>
         <div className="ctl" role="group" aria-label="Choose a sign-in portal">
           {(["student", "admin"] as const).map((portal) => (
-            <button key={portal} className="chip" aria-pressed={role === portal} onClick={() => { setRole(portal); setCreating(false); }}>
-              {portal === "student" ? "Student" : "Admin / committee admin"}
+            <button key={portal} className="chip" aria-pressed={role === portal} onClick={() => { setRole(portal); setCreating(false); setError(""); setNotice(""); }}>
+              {portal === "student" ? "Student" : "Admin"}
             </button>
           ))}
         </div>
@@ -202,54 +192,33 @@ function SignIn({
             <div className="fg">
               <label>First name<input className="in" name="first_name" maxLength={50} autoComplete="given-name" required /></label>
               <label>Last name<input className="in" name="last_name" maxLength={50} autoComplete="family-name" required /></label>
-              <label>Student ID <span className="mu">(optional)</span><input className="in" name="student_id" maxLength={20} autoComplete="off" placeholder="Leave blank to generate one" /></label>
               <label>Email<input className="in" name="email" type="email" maxLength={120} autoComplete="email" required /></label>
-              <label>Branch / department<select className="in" name="dept_id" required defaultValue=""><option value="" disabled>Select your branch</option>{departments.map((department) => <option key={department.dept_id} value={department.dept_id}>{department.dept_id} · {department.name}</option>)}</select></label>
-              <label>Year<select className="in" name="study_year" defaultValue="FE"><option>FE</option><option>SE</option><option>TE</option><option>BE</option></select></label>
-              <label>Division<input className="in" name="division" maxLength={5} defaultValue="A" required /></label>
-              <label>Phone <span className="mu">(optional)</span><input className="in" name="phone" type="tel" maxLength={15} autoComplete="tel" /></label>
-              <label>Gender <span className="mu">(optional)</span><select className="in" name="gender" defaultValue=""><option value="">Prefer not to say</option><option>Female</option><option>Male</option><option>Other</option></select></label>
-              <label>Date of birth <span className="mu">(optional)</span><input className="in" name="dob" type="date" /></label>
-              <label className="wide-field">Committee event
-                <select className="in" value={selectedEventId} onChange={(change) => setSelectedEventId(change.target.value)} required disabled={catalogLoading || !events.length}>
-                  {events.map((event) => {
-                    const committee = committees.find((item) => item.committee_id === event.committee_id);
-                    const seats = event.remaining == null ? "Seats available" : `${event.remaining} seats left`;
-                    return <option key={event.event_id} value={event.event_id}>{committee?.name || event.committee_id} · {event.name} · {seats}</option>;
-                  })}
+              {role === "admin" && <label>Choose Committee
+                <select className="in" name="committee_id" value={loginCommitteeId} onChange={(change) => setLoginCommitteeId(change.target.value)}
+                  disabled={committeesLoading || !loginCommittees.length} required>
+                  {loginCommittees.map((committee) => <option key={committee.committee_id} value={committee.committee_id}>{committee.name}</option>)}
                 </select>
+              </label>}
+              <label>Create Password <span className="mu">(12+ characters)</span>
+                <input className="in" name="password" type={passwordVisible ? "text" : "password"} minLength={12} maxLength={256} autoComplete="new-password" required />
+                <button className="btn g s" type="button" aria-pressed={passwordVisible} onClick={() => setPasswordVisible(!passwordVisible)}>
+                  {passwordVisible ? "Hide password" : "Show password"}
+                </button>
               </label>
-              {selectedEvent && <div className="registration-review wide-field">
-                <span className="m mu">COMMITTEE APPLICATION</span>
-                <h3>{committees.find((committee) => committee.committee_id === selectedEvent.committee_id)?.name || selectedEvent.committee_id}</h3>
-                <p>{selectedEvent.name}</p>
-                <p className="mu">{selectedEvent.description || "Committee registration"}</p>
-                <p className="m mu">
-                  {selectedEvent.venue || "Venue to be announced"} · {whenText(selectedEvent)}
-                  {" · "}{feeText(selectedEvent)}{" · "}{selectedEvent.capacity == null
-                    ? `${selectedEvent.registered || 0} registered · capacity not limited`
-                    : `${selectedEvent.registered || 0} / ${selectedEvent.capacity} registered · ${selectedEvent.remaining} seats left`}
-                </p>
-              </div>}
-              {selectedEvent?.registration_question && <label className="wide-field">{selectedEvent.registration_question}<textarea className="in" name="application_answer" rows={3} maxLength={2000} required /></label>}
-              {selectedEvent && Number(selectedEvent.fee) > 0 && <>
-                <label>Payment method<select className="in" name="method"><option>UPI</option><option>Card</option><option>Cash</option></select></label>
-                <label>Payment reference<input className="in" name="txn_ref" minLength={6} maxLength={60} required /></label>
-              </>}
-              <label>Password <span className="mu">(8+ characters)</span><input className="in" name="password" type="password" minLength={8} maxLength={256} autoComplete="new-password" required /></label>
             </div>
             <p className="note">Your department is saved as self-reported until an administrator verifies it. Department-restricted events remain unavailable until then.</p>
-            {catalogLoading && <p className="mu" role="status">Loading open committees…</p>}
-            {!catalogLoading && !events.length && <p className="auth-error" role="alert">There are no unrestricted committee events open for registration right now.</p>}
             {error && <p className="auth-error" role="alert">{error}</p>}
-            <button className="btn" disabled={pending || catalogLoading || !events.length}>{pending ? "Creating your account…" : "Create account & register"}</button>
+            <button className="btn" disabled={pending || committeesLoading || (role === "admin" && !loginCommittees.length)}>
+              {pending ? "Creating your account…" : `Create ${role} account`}
+            </button>
+            <button className="btn g" type="button" disabled={pending} onClick={() => { setCreating(false); setError(""); }}>Back to sign in</button>
           </form>
         ) : (
           <>
             <form onSubmit={submit}>
               <div className="fg">
                 <label>
-                  {role === "admin" ? "Admin / committee username or email" : "Student ID or email"}
+                  {role === "admin" ? "Admin email" : "Student email or ID"}
                   <input className="in" name="username" autoComplete="username" required />
                 </label>
                 {role === "admin" && <label>
@@ -260,13 +229,19 @@ function SignIn({
                 </label>}
                 <label>
                   Password
-                  <input className="in" name="password" type="password" autoComplete="current-password" required />
+                  <input className="in" name="password" type={passwordVisible ? "text" : "password"} autoComplete="current-password" required />
+                  <button className="btn g s" type="button" aria-pressed={passwordVisible} onClick={() => setPasswordVisible(!passwordVisible)}>
+                    {passwordVisible ? "Hide password" : "Show password"}
+                  </button>
                 </label>
               </div>
               {error && <p className="auth-error" role="alert">{error}</p>}
+              {notice && <p className="note" role="status">{notice}</p>}
               <button className="btn" disabled={pending}>{pending ? "Signing in…" : "Sign in"}</button>
             </form>
-            {role === "student" && <button className="btn g" type="button" onClick={() => { setCreating(true); setError(""); }}>Create a student account</button>}
+            <button className="btn g" type="button" onClick={() => { setCreating(true); setError(""); setNotice(""); }}>
+              {role === "student" ? "Create a student account" : "Create an admin account"}
+            </button>
             {role === "admin" && <p className="note">Admin access is restricted to authorized accounts. Committee accounts sign in here and remain limited to their assigned committee.</p>}
           </>
         )}
@@ -282,6 +257,7 @@ export default function App(): React.JSX.Element {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [regs, setRegs] = useState<StudentRegistration[]>([]);
   const [adminRegistrations, setAdminRegistrations] = useState<StudentRegistration[]>([]);
+  const [pendingAccounts, setPendingAccounts] = useState<{ account_id: number; first_name: string; last_name: string; email: string; committee_id: string; committee_name: string }[]>([]);
   const [allFeedback, setAllFeedback] = useState<FeedbackItem[]>([]);
 
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -306,8 +282,11 @@ export default function App(): React.JSX.Element {
   // Registration section form state
   const [regEventId, setRegEventId] = useState<number>(0);
   const [feedbackRating, setFeedbackRating] = useState<number>(5);
-  const [paymentMethod, setPaymentMethod] = useState("UPI");
-  const [paymentReference, setPaymentReference] = useState("");
+  const [feedbackCommitteeId, setFeedbackCommitteeId] = useState("");
+  const [feedbackEventId, setFeedbackEventId] = useState("");
+  const [feedbackRequestId, setFeedbackRequestId] = useState(() => crypto.randomUUID());
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [certificateEventId, setCertificateEventId] = useState("");
   const [applicationAnswer, setApplicationAnswer] = useState("");
   const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
   const [editingCommittee, setEditingCommittee] = useState<Committee | null>(null);
@@ -347,6 +326,10 @@ export default function App(): React.JSX.Element {
     setActive(result.user.student_id || "");
   };
 
+  const registerAdmin = async (details: AdminSignup) => {
+    await api("/auth/register-admin", { method: "POST", body: details });
+  };
+
   const signOut = async () => {
     try {
       await api("/auth/logout", { method: "POST" });
@@ -358,6 +341,7 @@ export default function App(): React.JSX.Element {
       setActive("");
       setRegs([]);
       setAdminRegistrations([]);
+      setPendingAccounts([]);
       setAllFeedback([]);
       setAlerts(new Map());
       setFollows(new Set());
@@ -391,6 +375,11 @@ export default function App(): React.JSX.Element {
       setOrgs(committeeList);
       setDepts(departmentList);
       setVenues(venueList);
+      if (user.role === "admin") {
+        setPendingAccounts(await api("/admin/accounts/pending"));
+      } else {
+        setPendingAccounts([]);
+      }
       if (user.role === "admin" || user.role === "committee") {
         const committeeId = user.role === "committee" ? user.committee_id : managedCommitteeId;
         if (!committeeId) {
@@ -694,6 +683,9 @@ export default function App(): React.JSX.Element {
   const me = user?.role === "student" ? user : undefined;
   const staffCommitteeId = user?.role === "committee" ? user.committee_id || "" : managedCommitteeId;
   const orgName = (id: string) => orgs.find((o) => o.committee_id === id)?.name || id;
+  const completedCommitteeEvents = events.filter((event) =>
+    event.committee_id === staffCommitteeId && event.status === "done"
+  );
   // Toggle Committee Filter Chip
   const toggleOrgChip = (orgId: string) => {
     setSelectedOrgs((prev) => {
@@ -865,13 +857,11 @@ export default function App(): React.JSX.Element {
     const f = Object.fromEntries(new FormData(form)) as any;
     const targetEvent = openEvents.find((e) => e.event_id === regEventId) || currentRegEvent || sel;
     if (!targetEvent) return;
-    const existingRegistration = regs.find((r) => r.committee_id === targetEvent.committee_id);
+    const existingRegistration = regs.find((r) =>
+      r.event_id === targetEvent.event_id && r.registration_status !== "Cancelled"
+    );
     if (existingRegistration) {
-      say("You are already registered with this committee.");
-      return;
-    }
-    if (new Set(regs.map((r) => r.committee_id)).size >= 3) {
-      say("You can register with up to three committees.");
+      say("You are already registered for this event.");
       return;
     }
 
@@ -884,8 +874,6 @@ export default function App(): React.JSX.Element {
         }
       });
       setRegistrationStep(1);
-      setPaymentMethod("UPI");
-      setPaymentReference("");
       setApplicationAnswer("");
       setSel(null);
     }, `Registered for ${targetEvent.name}`);
@@ -904,19 +892,26 @@ export default function App(): React.JSX.Element {
       await api("/feedback", {
         method: "POST",
         body: {
-          reg_id: f.reg_id,
+          committee_id: f.committee_id,
+          event_id: f.event_id || null,
+          request_id: feedbackRequestId,
           rating: feedbackRating,
           comments: f.comments
         }
       });
       form.reset();
+      setFeedbackRequestId(crypto.randomUUID());
     }, "Thanks for the verified feedback!");
   };
 
-  // 7 Days dates calculation
+  // Current week in the database's Asia/Kolkata date convention.
   const next7Days = useMemo(() => {
+    const monday = new Date();
+    monday.setHours(0, 0, 0, 0);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + weekOffset * 7);
     return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(Date.now() + i * 864e5);
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
       const iso = d.toLocaleDateString("sv-SE", { timeZone: "Asia/Kolkata" });
       const dayLabel = d.toLocaleDateString("en-IN", {
         weekday: "short",
@@ -925,33 +920,35 @@ export default function App(): React.JSX.Element {
       });
       const dayEvents = events.filter((e) => {
         if (!e.start_ts) return false;
-        const eDate = e.start_ts.split(" ")[0];
-        return eDate === iso;
+        const firstDay = e.start_ts.split(" ")[0];
+        const lastDay = (e.end_ts || e.start_ts).split(" ")[0];
+        return firstDay <= iso && lastDay >= iso;
       });
       return { iso, dayLabel, dayEvents };
     });
-  }, [events]);
-
-  const eligibleFeedbackRegs = useMemo(() => {
-    return regs.filter((r) => r.check_in && !r.rating);
-  }, [regs]);
+  }, [events, weekOffset]);
 
   const openEvents = events.filter((event) => {
     const registrationOpen = registrationState(event) === "Open";
     const eligible = !event.eligible_dept_id ||
       (Boolean(me?.department_verified) && event.eligible_dept_id === me?.dept_id);
-    const registeredWithCommittee = regs.some((registration) => registration.committee_id === event.committee_id);
-    return registrationOpen && eligible && !registeredWithCommittee;
+    const alreadyRegistered = regs.some((registration) => registration.event_id === event.event_id);
+    return registrationOpen && eligible && !alreadyRegistered;
   });
   const currentRegEvent = openEvents.find((e) => e.event_id === regEventId) || openEvents[0];
-  const registrationDisplayState = (event: EventItem) =>
-    user?.role === "student" && regs.some((registration) => registration.committee_id === event.committee_id)
-      ? "Registered" : registrationState(event);
+  const registrationDisplayState = (event: EventItem): string => {
+    const registration = user?.role === "student"
+      ? regs.find((item) => item.event_id === event.event_id)
+      : undefined;
+    return registration
+      ? registration.registration_status === "Cancelled" ? "Cancelled" : "Registered"
+      : registrationState(event);
+  };
 
   if (authLoading) {
     return <main className="auth-shell"><p className="mu">Restoring your secure session…</p></main>;
   }
-  if (!user) return <SignIn onSignedIn={signIn} onRegister={registerStudent} />;
+  if (!user) return <SignIn onSignedIn={signIn} onRegister={registerStudent} onAdminRegister={registerAdmin} />;
 
   return (
     <>
@@ -984,6 +981,7 @@ export default function App(): React.JSX.Element {
                 localStorage.setItem("cp_managed_committee", event.target.value);
                 setAllFeedback([]);
                 setAdminRegistrations([]);
+                setCertificateEventId("");
                 setManagedCommitteeId(event.target.value);
               }}
             >
@@ -992,14 +990,6 @@ export default function App(): React.JSX.Element {
           </label>}
           {user.role === "student" && <button className="btn g" onClick={() => setDrawerOpen(true)}>
             Alerts <span id="ac">{alerts.size + follows.size}</span>
-          </button>}
-          {user.role !== "student" && <button className="btn g s" disabled={!staffCommitteeId} onClick={() => run(async () => {
-            const result = await api<{ issued: number }>("/admin/issue-certificates", {
-              method: "POST", body: { committee_id: staffCommitteeId }
-            });
-            say(`${result.issued} eligible certificate${result.issued === 1 ? "" : "s"} issued`);
-          })}>
-            Issue eligible certificates
           </button>}
           <button className="btn g s" onClick={() => void signOut()}>Sign out</button>
         </div>
@@ -1022,7 +1012,7 @@ export default function App(): React.JSX.Element {
               at <s>SPIT</s>
             </h1>
             <p>
-              Live events, registrations, payments, attendance, feedback and certificates for every committee.
+              Live events, event registrations, attendance, feedback and certificates for every committee.
             </p>
             <div className="cta">
               <a className="btn" href="#live">
@@ -1237,8 +1227,13 @@ export default function App(): React.JSX.Element {
         <section id="week">
           <div className="sh">
             <div>
-              <h2>Next seven days</h2>
-              <p>Dated events across every committee.</p>
+              <h2>{weekOffset === 0 ? "This week" : weekOffset > 0 ? "Upcoming week" : "Previous week"}</h2>
+              <p>Browse dated events across every committee.</p>
+            </div>
+            <div className="ctl">
+              <button className="btn g s" onClick={() => setWeekOffset((offset) => offset - 1)}>Previous week</button>
+              <button className="btn g s" onClick={() => setWeekOffset(0)}>This week</button>
+              <button className="btn g s" onClick={() => setWeekOffset((offset) => offset + 1)}>Next week</button>
             </div>
           </div>
           <div className="week">
@@ -1324,12 +1319,12 @@ export default function App(): React.JSX.Element {
           </div>
         </section>
 
-        {/* Section 5: Registration & Payment */}
+        {/* Section 5: Event Registration */}
         <section id="register">
           <div className="sh">
             <div>
-              <h2>Committee registration</h2>
-              <p>Choose an eligible committee, review your application, and submit securely. Up to three committees per student.</p>
+              <h2>Event registration</h2>
+              <p>Choose an eligible event, review your details, and submit your registration.</p>
             </div>
             <span className="m mu">
               {me
@@ -1344,7 +1339,7 @@ export default function App(): React.JSX.Element {
                 <div className="ctl">
                   <span className={"b " + (registrationStep === 1 ? "ok" : "")}>1 · Select</span>
                   <span className={"b " + (registrationStep === 2 ? "ok" : "")}>2 · Review &amp; submit</span>
-                  <span className="m mu">{new Set(regs.map((r) => r.committee_id)).size} of 3 committees selected</span>
+                  <span className="m mu">{regs.filter((r) => r.registration_status !== "Cancelled").length} event registrations</span>
                 </div>
                 {openEvents.length === 0 ? (
                   <p className="em">
@@ -1362,8 +1357,6 @@ export default function App(): React.JSX.Element {
                       onChange={(e) => {
                         setRegEventId(+e.target.value);
                         setRegistrationStep(1);
-                        setPaymentReference("");
-                        setPaymentMethod("UPI");
                         setApplicationAnswer("");
                       }}
                     >
@@ -1400,29 +1393,6 @@ export default function App(): React.JSX.Element {
                       {currentRegEvent ? feeText(currentRegEvent) : "Free"}
                     </div>
                   </label>
-                  {currentRegEvent && (currentRegEvent.fee || 0) > 0 && (
-                    <>
-                      <label>
-                        Payment method
-                        <select className="in" name="method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
-                          <option>UPI</option>
-                          <option>Card</option>
-                          <option>Cash</option>
-                        </select>
-                      </label>
-                      <label>
-                        Transaction reference
-                        <input
-                          className="in"
-                          name="txn_ref"
-                          placeholder="UPI ref / receipt no."
-                          value={paymentReference}
-                          onChange={(event) => setPaymentReference(event.target.value)}
-                          required
-                        />
-                      </label>
-                    </>
-                  )}
                   {currentRegEvent?.registration_question && <label className="wide-field">
                     {currentRegEvent.registration_question}
                     <textarea className="in" name="application_answer" rows={3} maxLength={2000} value={applicationAnswer}
@@ -1441,16 +1411,6 @@ export default function App(): React.JSX.Element {
                             <div><dt>Venue</dt><dd>{currentRegEvent.venue || "To be announced"}</dd></div>
                             <div><dt>Registration availability</dt><dd>{currentRegEvent.remaining == null ? "Open" : `${currentRegEvent.remaining} seats remaining`}</dd></div>
                           </dl>
-                          {(currentRegEvent.fee || 0) > 0 && <div className="fg">
-                            <label>Payment method
-                              <select className="in" name="method" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
-                                <option>UPI</option><option>Card</option><option>Cash</option>
-                              </select>
-                            </label>
-                            <label>Payment reference
-                              <input className="in" name="txn_ref" minLength={6} maxLength={60} value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} required />
-                            </label>
-                          </div>}
                           {currentRegEvent.registration_question && <label>
                             {currentRegEvent.registration_question}
                             <textarea className="in" name="application_answer" rows={3} maxLength={2000} value={applicationAnswer}
@@ -1469,7 +1429,7 @@ export default function App(): React.JSX.Element {
                         </button>
                     </div>
                     <p className="note" style={{ marginTop: 12 }}>
-                        Availability is checked again by the server during submission. Payment references are recorded as pending verification.
+                        Availability and eligibility are checked again by the server during submission.
                     </p>
                   </>
                 )}
@@ -1491,8 +1451,7 @@ export default function App(): React.JSX.Element {
                   <th>Event</th>
                   <th>Registered on</th>
                   <th>Status</th>
-                  <th>Payment</th>
-                  <th>Attendance (Desk)</th>
+                  <th>Attendance</th>
                   <th>Certificate</th>
                 </tr>
               </thead>
@@ -1508,53 +1467,7 @@ export default function App(): React.JSX.Element {
                         <small className="sub-status">{r.event_status}</small>
                       </td>
                       <td>
-                        {r.pay_status ? (
-                          <span className="b wait">
-                            {r.pay_status} · ₹{r.amount}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td>
-                        {r.check_in ? (
-                          user.role === "admin" ? <>
-                            <span className="b ok">Present</span>{" "}
-                            {!r.check_out && (
-                              <button
-                                className="btn g s"
-                                onClick={() =>
-                                  run(
-                                    () =>
-                                      api("/attendance/check-out", {
-                                        method: "POST",
-                                        body: { reg_id: r.reg_id }
-                                      }),
-                                    "Checked out"
-                                  )
-                                }
-                              >
-                                Check out
-                              </button>
-                            )}
-                          </> : <span className="b ok">Present</span>
-                        ) : (
-                          user.role === "admin" ? <button
-                            className="btn g s"
-                            onClick={() =>
-                              run(
-                                () =>
-                                  api("/attendance/check-in", {
-                                    method: "POST",
-                                    body: { reg_id: r.reg_id }
-                                  }),
-                                "Checked in"
-                              )
-                            }
-                          >
-                            Check in
-                          </button> : <span className="b wait">Awaiting event check-in</span>
-                        )}
+                        {r.check_in ? <span className="b ok">Attended</span> : <span className="b wait">Not marked</span>}
                       </td>
                       <td>
                         {r.cert_id ? (
@@ -1583,16 +1496,34 @@ export default function App(): React.JSX.Element {
           <div className="sh">
             <div>
               <h2>{user.role === "committee" ? `${orgName(staffCommitteeId)} roster` : "Committee registrations"}</h2>
-              <p>Student applications and feedback are limited to the selected committee. Cancelled registrations stay in the database for history.</p>
+              <p>Review event registrations and mark attendance after the selected event has ended. Cancelled registrations stay in the database for history.</p>
             </div>
             {user.role === "committee" && <span className="b ok">{orgName(staffCommitteeId)}</span>}
           </div>
           {!staffCommitteeId ? (
             <p className="em">Select a committee to view its applications.</p>
           ) : (
+            <>
+            <div className="ctl">
+              <label>Completed event
+                <select className="in" value={certificateEventId} onChange={(event) => setCertificateEventId(event.target.value)}
+                  disabled={!completedCommitteeEvents.length}>
+                  <option value="">Choose an event</option>
+                  {completedCommitteeEvents.map((event) => <option key={event.event_id} value={event.event_id}>{event.name}</option>)}
+                </select>
+              </label>
+              <button className="btn g s" disabled={!certificateEventId || dataLoading} onClick={() => void run(async () => {
+                const result = await api<{ issued: number; skipped: number }>("/admin/issue-certificates", {
+                  method: "POST",
+                  body: { committee_id: staffCommitteeId, event_id: Number(certificateEventId) }
+                });
+                say(`${result.issued} certificate${result.issued === 1 ? "" : "s"} issued; ${result.skipped} registration${result.skipped === 1 ? "" : "s"} not eligible.`);
+              })}>Issue event certificates</button>
+              {!completedCommitteeEvents.length && <span className="mu">No completed events in this committee.</span>}
+            </div>
             <div className="panel ow">
               <table className="tb">
-                <thead><tr><th>Student</th><th>Branch / contact</th><th>Event</th><th>Registered</th><th>Application</th><th>Payment</th><th>Attendance</th><th>Certificate</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Student</th><th>Branch / contact</th><th>Event</th><th>Registered</th><th>Application</th><th>Attendance</th><th>Certificate</th><th>Actions</th></tr></thead>
                 <tbody>{adminRegistrations.map((registration) => (
                   <tr key={registration.reg_id}>
                     <td>{registration.first_name} {registration.last_name}<small className="sub-status">{registration.student_id}</small></td>
@@ -1602,18 +1533,17 @@ export default function App(): React.JSX.Element {
                     <td>{registration.name}</td>
                     <td>{registration.registered_on}<small className="sub-status">{registration.registration_status}</small></td>
                     <td>{registration.application_answer || "—"}</td>
-                    <td>{registration.pay_status || "—"}{registration.amount != null && ` · ₹${registration.amount}`}</td>
-                    <td>{registration.check_in ? "Checked in" : "Not checked in"}{registration.check_out && " · Checked out"}</td>
+                    <td>{registration.check_in ? "Attended" : registration.event_status === "done" ? "Not marked" : "Event not ended"}</td>
                     <td>{registration.cert_id ? <span className="b ok">CERT{1000 + registration.cert_id}</span> : "Not yet eligible"}</td>
                     <td>
                       {registration.registration_status === "Confirmed" && <>
-                        {!registration.check_in ? <button className="btn g s" onClick={() => run(
-                          () => api("/attendance/check-in", { method: "POST", body: { reg_id: registration.reg_id, committee_id: staffCommitteeId } }),
-                          "Student checked in"
-                        )}>Check in</button> : !registration.check_out && <button className="btn g s" onClick={() => run(
-                          () => api("/attendance/check-out", { method: "POST", body: { reg_id: registration.reg_id, committee_id: staffCommitteeId } }),
-                          "Student checked out"
-                        )}>Check out</button>}
+                        {registration.event_status === "done" && <button className="btn g s" onClick={() => run(
+                          () => api(`/admin/events/${registration.event_id}/attendance`, {
+                            method: "PUT",
+                            body: { reg_id: registration.reg_id, attended: !registration.check_in, committee_id: staffCommitteeId }
+                          }),
+                          registration.check_in ? "Attendance removed" : "Student marked attended"
+                        )}>{registration.check_in ? "Undo attendance" : "Mark attended"}</button>}
                         <button className="btn g s" onClick={() => {
                           if (window.confirm(`Cancel ${registration.first_name} ${registration.last_name}'s registration for ${registration.name}? Their student account and history will be preserved.`)) {
                             void run(
@@ -1626,9 +1556,10 @@ export default function App(): React.JSX.Element {
                     </td>
                   </tr>
                 ))}
-                {adminRegistrations.length === 0 && <tr><td colSpan={9} className="mu">No applications for {orgName(staffCommitteeId)} yet.</td></tr>}</tbody>
+                {adminRegistrations.length === 0 && <tr><td colSpan={8} className="mu">No applications for {orgName(staffCommitteeId)} yet.</td></tr>}</tbody>
               </table>
             </div>
+            </>
           )}
         </section>}
 
@@ -1638,6 +1569,27 @@ export default function App(): React.JSX.Element {
               <h2>Event &amp; committee setup</h2>
               <p>Manage live catalog data, venues, registration windows, eligibility and seat limits.</p>
             </div>
+          </div>
+          <div className="panel pad">
+            <h3>Committee account requests</h3>
+            <p className="note">Approve or reject self-registered committee accounts before they can sign in.</p>
+            {pendingAccounts.length ? pendingAccounts.map((account) => (
+              <div className="ctl" key={account.account_id}>
+                <span>{account.first_name} {account.last_name} · {account.email} · {account.committee_name}</span>
+                <button className="btn s" onClick={() => void run(
+                  () => api(`/admin/accounts/${account.account_id}/approval`, { method: "PATCH", body: { decision: "Approved" } }),
+                  "Committee account approved"
+                )}>Approve</button>
+                <button className="btn g s" onClick={() => {
+                  if (window.confirm(`Reject the admin request from ${account.first_name} ${account.last_name}?`)) {
+                    void run(
+                      () => api(`/admin/accounts/${account.account_id}/approval`, { method: "PATCH", body: { decision: "Rejected" } }),
+                      "Committee account rejected"
+                    );
+                  }
+                }}>Reject</button>
+              </div>
+            )) : <p className="mu">No pending committee account requests.</p>}
           </div>
           <form key={editingEvent?.event_id || "new-event"} className="panel pad" onSubmit={saveEvent}>
             <h3>{editingEvent ? `Edit: ${editingEvent.name}` : "Create an event"}</h3>
@@ -1817,22 +1769,31 @@ export default function App(): React.JSX.Element {
           <div className="sh">
             <div>
               <h2>Feedback</h2>
-              <p>Only students who attended an event can rate it.</p>
+              <p>Share feedback about a committee, optionally tied to one of its events.</p>
             </div>
           </div>
 
           <div className="panel pad">
-            {user.role === "student" && eligibleFeedbackRegs.length > 0 ? (
+            {user.role === "student" ? (
               <form onSubmit={handleFeedback}>
                 <div className="fg">
                   <label>
-                    Event
-                    <select className="in" name="reg_id">
-                      {eligibleFeedbackRegs.map((r) => (
-                        <option key={r.reg_id} value={r.reg_id}>
-                          {r.name}
-                        </option>
-                      ))}
+                    Committee
+                    <select className="in" name="committee_id" value={feedbackCommitteeId || orgs[0]?.committee_id || ""}
+                      onChange={(event) => {
+                        setFeedbackCommitteeId(event.target.value);
+                        setFeedbackEventId("");
+                      }} required>
+                      {orgs.map((committee) => <option key={committee.committee_id} value={committee.committee_id}>{committee.name}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    Event (optional)
+                    <select className="in" name="event_id" value={feedbackEventId}
+                      onChange={(event) => setFeedbackEventId(event.target.value)}>
+                      <option value="">General committee feedback</option>
+                      {events.filter((event) => event.committee_id === (feedbackCommitteeId || orgs[0]?.committee_id))
+                        .map((event) => <option key={event.event_id} value={event.event_id}>{event.name}</option>)}
                     </select>
                   </label>
                 </div>
@@ -1852,19 +1813,13 @@ export default function App(): React.JSX.Element {
                 <div className="fg">
                   <label>
                     Comments
-                    <textarea className="in" name="comments" rows={3} placeholder="Share your experience..." />
+                    <textarea className="in" name="comments" rows={3} maxLength={4000} placeholder="Share your experience..." required />
                   </label>
                 </div>
                 <button className="btn">Submit feedback</button>
               </form>
-            ) : user.role !== "student" ? (
-              <p className="em">Student feedback submission is available only in the student portal. This view shows feedback for {orgName(staffCommitteeId)} only.</p>
             ) : (
-              <p className="em">
-                {me
-                  ? "No events pending feedback. Feedback opens once your attendance is marked at an event."
-                  : "Select an active student first."}
-              </p>
+              <p className="em">Student feedback submission is available only in the student portal. This view shows feedback for {orgName(staffCommitteeId)} only.</p>
             )}
           </div>
 
@@ -1884,7 +1839,7 @@ export default function App(): React.JSX.Element {
                 {allFeedback.length > 0 ? (
                   allFeedback.map((fb) => (
                     <tr key={fb.feedback_id}>
-                      <td>{fb.event_name}</td>
+                      <td>{fb.event_name || fb.committee_name}</td>
                       <td>
                         {fb.first_name} {fb.last_name}
                       </td>
@@ -1907,31 +1862,6 @@ export default function App(): React.JSX.Element {
           </div>
         </section>
 
-        {/* Section 10: How It Works */}
-        <section id="how">
-          <div className="sh">
-            <div>
-              <h2>How it works</h2>
-              <p>From poster to certificate in six steps.</p>
-            </div>
-          </div>
-          <div className="grid">
-            {[
-              ["Discover", "Browse live and upcoming events from every committee."],
-              ["Follow", "Follow committees and set alerts so you never miss a post."],
-              ["Register", "Sign up on the official link, then record it here."],
-              ["Pay", "Log your UPI, card or cash reference for paid events."],
-              ["Attend", "Check in and out at the committee desk."],
-              ["Get certified", "Certificates unlock once you attended and the event has ended."]
-            ].map(([title, desc], idx) => (
-              <div key={title} className="cm">
-                <span className="m mu">STEP {idx + 1}</span>
-                <h3>{title}</h3>
-                <p>{desc}</p>
-              </div>
-            ))}
-          </div>
-        </section>
       </main>
 
       {/* Footer */}

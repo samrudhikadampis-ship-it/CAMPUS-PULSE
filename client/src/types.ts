@@ -51,9 +51,9 @@ export interface Student {
   student_id: string;
   first_name: string;
   last_name: string;
-  dept_id: string;
-  study_year: 'FE' | 'SE' | 'TE' | 'BE';
-  division: string;
+  dept_id: string | null;
+  study_year: 'FE' | 'SE' | 'TE' | 'BE' | null;
+  division: string | null;
   phone: string | null;
   email: string | null;
   gender: 'Female' | 'Male' | 'Other' | null;
@@ -105,11 +105,14 @@ export interface DeptSummary {
 
 export interface FeedbackItem {
   feedback_id: number;
-  reg_id: number;
+  reg_id: number | null;
   student_id: string;
   first_name: string;
   last_name: string;
-  event_name: string;
+  committee_id: string;
+  committee_name: string;
+  event_id: number | null;
+  event_name: string | null;
   rating: number;
   comments: string | null;
   submitted_on?: string;

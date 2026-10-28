@@ -51,9 +51,9 @@ export interface Student {
   student_id: string;
   first_name: string;
   last_name: string;
-  dept_id: string;
-  study_year: 'FE' | 'SE' | 'TE' | 'BE';
-  division: string;
+  dept_id: string | null;
+  study_year: 'FE' | 'SE' | 'TE' | 'BE' | null;
+  division: string | null;
   phone: string | null;
   email: string | null;
   gender: 'Female' | 'Male' | 'Other' | null;

@@ -11,7 +11,7 @@ dotenv.config();
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import mysql, { Pool, RowDataPacket, ResultSetHeader } from "mysql2/promise";
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import {
   Department,
@@ -53,6 +53,7 @@ interface AuthContext {
   email?: string | null;
   is_active?: number;
   department_verified?: number;
+  approval_status?: "Pending" | "Approved" | "Rejected";
 }
 
 declare global {
@@ -155,17 +156,23 @@ const requireAuth = (req: Request, res: Response, next: NextFunction) => {
   if (!token) return res.status(401).json({ error: "Please sign in to continue." });
   h(async (request, response, done) => {
     const session = await rows<RowDataPacket[] & AuthContext[]>(
-      `SELECT a.account_id, a.username, a.role, a.student_id, a.committee_id,
-              s.first_name, s.last_name, s.dept_id, s.study_year, s.division, s.email, s.is_active,
-              s.department_verified
+      `SELECT a.account_id, a.username, a.role, a.student_id, a.committee_id,a.approval_status,
+              COALESCE(a.first_name,s.first_name) AS first_name,
+              COALESCE(a.last_name,s.last_name) AS last_name,
+              s.dept_id,s.study_year,s.division,COALESCE(a.email,s.email) AS email,
+              s.is_active,s.department_verified
        FROM auth_sessions x JOIN user_accounts a ON a.account_id = x.account_id
        LEFT JOIN students s ON s.student_id = a.student_id
        WHERE x.session_id = ? AND x.expires_at > NOW()`,
       [tokenHash(token)]
     );
     const user = session[0];
-    if (!user || (user.role !== "admin" && !user.is_active)) {
+    if (!user || (user.role === "student" && !user.is_active)) {
       response.status(401).json({ error: "Your session has expired or your account is inactive. Sign in again." });
+      return;
+    }
+    if (user.role === "committee" && user.approval_status !== "Approved") {
+      response.status(403).json({ error: "This committee account is awaiting superadmin approval." });
       return;
     }
     request.auth = user;
@@ -216,16 +223,23 @@ app.post("/api/auth/login", h(async (req, res) => {
   if (!["admin", "student"].includes(role)) throw fail(400, "Choose a valid sign-in portal.");
   const rolePredicate = role === "admin" ? "a.role IN ('admin','committee')" : "a.role = ?";
   const account = await rows<RowDataPacket[] & (AuthContext & { password_hash: string })[]>(
-    `SELECT a.account_id, a.username, a.password_hash, a.role, a.student_id, a.committee_id,
-            s.first_name, s.last_name, s.dept_id, s.study_year, s.division, s.email, s.is_active,
-            s.department_verified
+    `SELECT a.account_id,a.username,a.password_hash,a.role,a.student_id,a.committee_id,a.approval_status,
+            COALESCE(a.first_name,s.first_name) AS first_name,
+            COALESCE(a.last_name,s.last_name) AS last_name,
+            s.dept_id,s.study_year,s.division,COALESCE(a.email,s.email) AS email,
+            s.is_active,s.department_verified
      FROM user_accounts a LEFT JOIN students s ON s.student_id = a.student_id
      WHERE (a.username = ? OR (a.role = 'student' AND LOWER(s.email) = ?)) AND ${rolePredicate}`,
     role === "admin" ? [username, username] : [username, username, role]
   );
   const user = account[0];
-  if (!user || !(await passwordMatches(password, user.password_hash)) ||
-      (user.role !== "admin" && !user.is_active)) {
+  if (!user || !(await passwordMatches(password, user.password_hash))) {
+    throw fail(401, "The sign-in details are incorrect or this account is inactive.");
+  }
+  if (user.role === "committee" && user.approval_status !== "Approved") {
+    throw fail(403, "This committee account is awaiting superadmin approval.");
+  }
+  if (user.role === "student" && !user.is_active) {
     throw fail(401, "The sign-in details are incorrect or this account is inactive.");
   }
   const token = randomBytes(32).toString("hex");
@@ -266,14 +280,16 @@ app.get("/api/departments", h(async (_req, res) => {
 app.get("/api/venues", h(async (_req, res) => {
   res.json(await rows<RowDataPacket[]>("SELECT venue_id,name FROM venues ORDER BY name ASC"));
 }));
-app.get("/api/events", h(async (_req, res) => {
+app.get("/api/events", requireAuth, h(async (req, res) => {
+  const committeeFilter = req.auth!.role === "committee" ? "WHERE es.committee_id=?" : "";
   const events = await rows<RowDataPacket[] & (EventItem & RowDataPacket)[]>(`
     SELECT es.*, v.name AS venue, es.capacity, es.registration_open, es.registration_closes_at,
       es.eligible_dept_id, es.registration_question,
       (SELECT COUNT(*) FROM registrations r WHERE r.event_id = es.event_id AND r.status = 'Confirmed') AS registered
     FROM event_status es LEFT JOIN venues v ON v.venue_id = es.venue_id
+    ${committeeFilter}
     ORDER BY BINARY es.status = BINARY 'done', es.start_ts ASC
-  `);
+  `, req.auth!.role === "committee" ? [req.auth!.committee_id] : []);
   const links = await rows<RowDataPacket[] & EventLink[]>("SELECT * FROM event_links");
   res.json(events.map((e) => ({
     ...e,
@@ -333,87 +349,74 @@ const validateStudent = async (body: any, includePassword: boolean, minimumPassw
 };
 
 app.post("/api/auth/register-student", h(async (req, res) => {
-  const studentId = req.body?.student_id
-    ? requiredText(req.body.student_id, "Student ID", 20).toUpperCase()
-    : `CP-${randomBytes(6).toString("hex").toUpperCase()}`;
-  const student = await validateStudent({ ...req.body, student_id: studentId }, true, 8);
-  if (!student.email) throw fail(400, "Email is required.");
-  const eventId = positiveInt(req.body?.event_id, "Committee event");
-  const applicationAnswer = optionalText(req.body?.application_answer, 2000);
+  const firstName = requiredText(req.body?.first_name, "First name", 50);
+  const lastName = requiredText(req.body?.last_name, "Last name", 50);
+  const email = validEmail(req.body?.email);
+  if (!email) throw fail(400, "Email is required.");
+  const password = requiredText(req.body?.password, "Password", 256);
+  if (password.length < 12) throw fail(400, "Passwords must be at least 12 characters.");
+  const studentId = `CP-${randomBytes(6).toString("hex").toUpperCase()}`;
+  const passwordHashValue = await passwordHash(password);
   const conn = await db.getConnection();
   try {
-    await conn.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
     await conn.beginTransaction();
-    const [events] = await conn.query<RowDataPacket[]>(
-      `SELECT event_id,committee_id,fee,capacity,registration_open,registration_closes_at,
-        registration_question,eligible_dept_id,
-        (registration_closes_at IS NOT NULL AND registration_closes_at<=NOW()) AS deadline_passed,
-        (end_ts IS NOT NULL AND end_ts<NOW()) AS event_ended
-       FROM events WHERE event_id=? FOR UPDATE`, [eventId]);
-    const event = events[0];
-    if (!event) throw fail(404, "Choose a valid committee event.");
-    if (!event.registration_open || event.deadline_passed || event.event_ended) {
-      throw fail(409, "Registration for this event has closed.");
-    }
-    if (event.eligible_dept_id) {
-      throw fail(409, "This event requires an administrator-verified department. Choose an unrestricted event or contact the administrator.");
-    }
-    if (event.registration_question && !applicationAnswer) {
-      throw fail(400, "Answer the committee's required application question.");
-    }
-    const [counts] = await conn.query<RowDataPacket[]>(
-      "SELECT COUNT(*) AS registered FROM registrations WHERE event_id=? AND status='Confirmed'", [eventId]);
-    if (event.capacity != null && Number(counts[0].registered) >= Number(event.capacity)) {
-      throw fail(409, "This committee event is full. Please choose another.");
-    }
-    let payment: { txn_ref: string; method: string } | null = null;
-    if (Number(event.fee) > 0) {
-      const txn_ref = requiredText(req.body?.txn_ref, "Payment reference", 60);
-      if (txn_ref.length < 6) throw fail(400, "Payment reference must be at least 6 characters.");
-      const method = req.body?.method || "UPI";
-      if (!["UPI", "Card", "Cash"].includes(method)) throw fail(400, "Choose a valid payment method.");
-      payment = { txn_ref, method };
-    }
     await conn.query(
-      `INSERT INTO students
-        (student_id,first_name,last_name,dept_id,study_year,division,phone,email,gender,dob,is_active,department_verified)
-       VALUES (?,?,?,?,?,?,?,?,?,?,TRUE,FALSE)`,
-      [student.student_id,student.first_name,student.last_name,student.dept_id,student.study_year,student.division,
-        student.phone,student.email,student.gender,student.dob]
+      `INSERT INTO students (student_id,first_name,last_name,email,department_verified)
+       VALUES (?,?,?, ?,FALSE)`,
+      [studentId,firstName,lastName,email]
     );
     await conn.query(
-      "INSERT INTO user_accounts (username,password_hash,role,student_id) VALUES (?,?,'student',?)",
-      [student.student_id,student.password_hash,student.student_id]
-    );
-    const [insert] = await conn.query<ResultSetHeader>(
-      "INSERT INTO registrations (student_id,event_id,application_answer) VALUES (?,?,?)",
-      [student.student_id,eventId,applicationAnswer]
-    );
-    if (payment) await conn.query(
-      "INSERT INTO payments (reg_id,txn_ref,method,amount) VALUES (?,?,?,?)",
-      [insert.insertId,payment.txn_ref,payment.method,event.fee]
+      `INSERT INTO user_accounts
+        (username,password_hash,role,student_id,first_name,last_name,email,approval_status)
+       VALUES (?,?,'student',?,?,?,?,'Approved')`,
+      [email,passwordHashValue,studentId,firstName,lastName,email]
     );
     const [accounts] = await conn.query<RowDataPacket[]>(
-      `SELECT a.account_id,a.username,a.role,a.student_id,a.committee_id,
+      `SELECT a.account_id,a.username,a.role,a.student_id,a.committee_id,a.approval_status,
         s.first_name,s.last_name,s.dept_id,s.study_year,s.division,s.email,s.is_active,s.department_verified
        FROM user_accounts a JOIN students s ON s.student_id=a.student_id
-       WHERE a.student_id=? AND a.role='student'`, [student.student_id]);
+       WHERE a.student_id=? AND a.role='student'`, [studentId]);
     const token = randomBytes(32).toString("hex");
     await conn.query(
       "INSERT INTO auth_sessions (session_id,account_id,expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? HOUR))",
       [tokenHash(token),accounts[0].account_id,SESSION_HOURS]
     );
     await conn.commit();
-    res.status(201).json({ token,user:accounts[0],registration:{reg_id:insert.insertId,event_id:eventId} });
+    res.status(201).json({ token,user:accounts[0] });
   } catch (error) {
     await conn.rollback();
     if ((error as any).code === "ER_DUP_ENTRY") {
-      throw fail(409, "That student ID or email already has an account. Sign in with it instead.");
+      throw fail(409, "An account already exists for this email. Sign in instead.");
     }
     throw error;
   } finally {
     conn.release();
   }
+}));
+
+app.post("/api/auth/register-admin", h(async (req, res) => {
+  const firstName = requiredText(req.body?.first_name, "First name", 50);
+  const lastName = requiredText(req.body?.last_name, "Last name", 50);
+  const email = validEmail(req.body?.email);
+  if (!email) throw fail(400, "Email is required.");
+  const password = requiredText(req.body?.password, "Password", 256);
+  if (password.length < 12) throw fail(400, "Passwords must be at least 12 characters.");
+  const committeeId = requiredText(req.body?.committee_id, "Committee", 15).toUpperCase();
+  const committee = await rows<RowDataPacket[]>(
+    "SELECT committee_id FROM committees WHERE committee_id=?", [committeeId]);
+  if (!committee.length) throw fail(400, "Choose an existing committee.");
+  try {
+    await db.query(
+      `INSERT INTO user_accounts
+        (username,password_hash,role,committee_id,first_name,last_name,email,approval_status)
+       VALUES (?,?, 'committee', ?,?,?,?,'Pending')`,
+      [email,await passwordHash(password),committeeId,firstName,lastName,email]
+    );
+  } catch (error) {
+    if ((error as AppError).code === "ER_DUP_ENTRY") throw fail(409, "An account already exists for this email.");
+    throw error;
+  }
+  res.status(202).json({ ok: true, approval_status: "Pending" });
 }));
 
 app.post("/api/students", ...requireAdmin, h(async (req, res) => {
@@ -585,37 +588,26 @@ app.post("/api/registrations", ...requireStudent, h(async (req, res) => {
     if (event.eligible_dept_id && event.eligible_dept_id !== student.dept_id) {
       throw fail(403, "Your verified department is not eligible for this event.");
     }
+    const [existingRegistrations] = await conn.query<RowDataPacket[]>(
+      "SELECT status FROM registrations WHERE student_id=? AND event_id=?",
+      [studentId,eventId]
+    );
+    if (existingRegistrations.length) {
+      throw fail(409, existingRegistrations[0].status === "Confirmed"
+        ? "You are already registered for this event."
+        : "Your previous registration for this event was cancelled. Contact the committee for help.");
+    }
     const [countRows] = await conn.query<RowDataPacket[]>(
       "SELECT COUNT(*) AS registered FROM registrations WHERE event_id=? AND status='Confirmed'", [eventId]);
     if (event.capacity != null && Number(countRows[0].registered) >= Number(event.capacity)) {
       throw fail(409, "This event is full.");
     }
-    const [existing] = await conn.query<RowDataPacket[]>(
-      "SELECT r.reg_id FROM registrations r JOIN events e ON e.event_id=r.event_id WHERE r.student_id=? AND e.committee_id=?",
-      [studentId, event.committee_id]
-    );
-    if (existing.length) throw fail(409, "You are already registered with this committee.");
-    const [committeeCount] = await conn.query<RowDataPacket[]>(
-      `SELECT COUNT(DISTINCT e.committee_id) AS count FROM registrations r
-       JOIN events e ON e.event_id=r.event_id WHERE r.student_id=? AND r.status='Confirmed'`, [studentId]);
-    if (Number(committeeCount[0].count) >= 3) throw fail(409, "You can register with up to three committees.");
     const answer = optionalText(req.body?.application_answer, 2000);
     if (event.registration_question && !answer) throw fail(400, "Answer the required application question.");
 
-    let payment: { txn_ref: string; method: string } | null = null;
-    if (Number(event.fee) > 0) {
-      const txn_ref = requiredText(req.body?.txn_ref, "Payment reference", 60);
-      if (txn_ref.length < 6) throw fail(400, "Payment reference must be at least 6 characters.");
-      const method = req.body?.method || "UPI";
-      if (!["UPI", "Card", "Cash"].includes(method)) throw fail(400, "Choose a valid payment method.");
-      payment = { txn_ref, method };
-    }
     const [insert] = await conn.query<ResultSetHeader>(
       "INSERT INTO registrations (student_id,event_id,application_answer) VALUES (?,?,?)",
       [studentId, eventId, answer]);
-    if (payment) await conn.query(
-      "INSERT INTO payments (reg_id,txn_ref,method,amount) VALUES (?,?,?,?)",
-      [insert.insertId, payment.txn_ref, payment.method, event.fee]);
     await conn.commit();
     res.status(201).json({ reg_id: insert.insertId });
   } catch (error) {
@@ -647,6 +639,45 @@ app.post("/api/attendance/check-out", ...requireCommitteeManager, h(async (req, 
   res.json({ ok: true });
 }));
 
+app.put("/api/admin/events/:id/attendance", ...requireCommitteeManager, h(async (req, res) => {
+  const eventId = positiveInt(req.params.id, "Event");
+  const regId = positiveInt(req.body?.reg_id, "Registration");
+  if (typeof req.body?.attended !== "boolean") throw fail(400, "Attendance must be true or false.");
+  const committeeId = committeeScope(req);
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [events] = await conn.query<RowDataPacket[]>(
+      "SELECT committee_id,end_ts,end_ts IS NOT NULL AND end_ts<=NOW() AS completed FROM events WHERE event_id=? FOR UPDATE",
+      [eventId]
+    );
+    const event = events[0];
+    if (!event || event.committee_id !== committeeId) throw fail(404, "Event not found for this committee.");
+    if (!event.completed) throw fail(409, "Attendance can be finalized after the event has ended.");
+    const [registrations] = await conn.query<RowDataPacket[]>(
+      "SELECT reg_id FROM registrations WHERE reg_id=? AND event_id=? AND status='Confirmed'",
+      [regId,eventId]
+    );
+    if (!registrations.length) throw fail(404, "Confirmed registration not found for this event.");
+    const [certificates] = await conn.query<RowDataPacket[]>(
+      "SELECT cert_id FROM certificates WHERE reg_id=?", [regId]
+    );
+    if (certificates.length) throw fail(409, "Attendance is locked because a certificate has already been issued.");
+    if (req.body.attended) {
+      await conn.query("INSERT IGNORE INTO attendance (reg_id,status) VALUES (?,'Attended')", [regId]);
+    } else {
+      await conn.query("DELETE FROM attendance WHERE reg_id=?", [regId]);
+    }
+    await conn.commit();
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+  res.json({ ok: true });
+}));
+
 app.get("/api/payments", ...requireAdmin, h(async (_req, res) => {
   res.json(await rows<RowDataPacket[]>(`
     SELECT p.*,r.student_id,s.first_name,s.last_name,e.name AS event_name FROM payments p
@@ -667,49 +698,97 @@ app.get("/api/feedback", requireAuth, h(async (req, res) => {
   let scope = "";
   const params: unknown[] = [];
   if (role === "student") {
-    scope = "WHERE r.student_id=?";
+    scope = "WHERE f.student_id=?";
     params.push(req.auth!.student_id);
   } else if (role === "committee") {
-    scope = "WHERE e.committee_id=?";
+    scope = "WHERE f.committee_id=?";
     params.push(req.auth!.committee_id);
   } else if (role === "admin") {
-    scope = "WHERE e.committee_id=?";
+    scope = "WHERE f.committee_id=?";
     params.push(committeeScope(req));
   } else {
     throw fail(403, "You are not authorized to view feedback.");
   }
   res.json(await rows<RowDataPacket[]>(`
-    SELECT f.feedback_id,f.reg_id,r.student_id,s.first_name,s.last_name,e.name AS event_name,
+    SELECT f.feedback_id,f.reg_id,f.student_id,s.first_name,s.last_name,
+      f.committee_id,cm.name AS committee_name,f.event_id,e.name AS event_name,
       f.rating,f.comments,f.submitted_on
-    FROM feedback f JOIN registrations r ON r.reg_id=f.reg_id
-    JOIN students s ON s.student_id=r.student_id JOIN events e ON e.event_id=r.event_id
+    FROM feedback f JOIN students s ON s.student_id=f.student_id
+    LEFT JOIN events e ON e.event_id=f.event_id
+    JOIN committees cm ON cm.committee_id=f.committee_id
     ${scope} ORDER BY f.feedback_id DESC`, params));
 }));
 app.post("/api/feedback", ...requireStudent, h(async (req, res) => {
-  const regId = positiveInt(req.body?.reg_id, "Registration");
+  const committeeId = requiredText(req.body?.committee_id, "Committee", 15).toUpperCase();
+  const requestId = requiredText(req.body?.request_id, "Submission ID", 36);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) {
+    throw fail(400, "Submission ID must be a valid UUID.");
+  }
+  const eventId = req.body?.event_id ? positiveInt(req.body.event_id, "Event") : null;
   const rating = Number(req.body?.rating);
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw fail(400, "Rating must be from 1 to 5.");
-  const comments = optionalText(req.body?.comments, 4000);
-  const own = await rows<RowDataPacket[]>(
-    "SELECT r.reg_id FROM registrations r JOIN attendance a ON a.reg_id=r.reg_id WHERE r.reg_id=? AND r.student_id=?",
-    [regId, req.auth!.student_id]);
-  if (!own.length) throw fail(404, "Feedback is available only for events you attended.");
-  await db.query("INSERT INTO feedback (reg_id,rating,comments) VALUES (?,?,?)", [regId, rating, comments]);
-  res.status(201).json({ ok: true });
+  const comments = requiredText(req.body?.comments, "Feedback message", 4000);
+  const [committees] = await db.query<RowDataPacket[]>(
+    "SELECT committee_id FROM committees WHERE committee_id=?", [committeeId]);
+  if (!committees.length) throw fail(400, "Choose an existing committee.");
+  if (eventId) {
+    const [events] = await db.query<RowDataPacket[]>(
+      "SELECT event_id FROM events WHERE event_id=? AND committee_id=?", [eventId,committeeId]);
+    if (!events.length) throw fail(400, "The selected event does not belong to this committee.");
+  }
+  const [existing] = await db.query<RowDataPacket[]>(
+    "SELECT feedback_id FROM feedback WHERE request_id=? AND student_id=?",
+    [requestId,req.auth!.student_id]
+  );
+  if (existing.length) {
+    res.json({ ok: true, feedback_id: existing[0].feedback_id, duplicate: true });
+    return;
+  }
+  const [insert] = await db.query<ResultSetHeader>(
+    `INSERT INTO feedback
+      (reg_id,student_id,committee_id,event_id,request_id,rating,comments)
+     VALUES (NULL,?,?,?,?,?,?)`,
+    [req.auth!.student_id,committeeId,eventId,requestId,rating,comments]
+  );
+  res.status(201).json({ ok: true, feedback_id: insert.insertId });
 }));
 
 app.post("/api/admin/issue-certificates", ...requireCommitteeManager, h(async (req, res) => {
   const committeeId = committeeScope(req);
-  const [result] = await db.query<ResultSetHeader>(
-    `INSERT IGNORE INTO certificates (reg_id)
-     SELECT r.reg_id FROM registrations r
-     JOIN students s ON s.student_id=r.student_id AND s.is_active=1
-     JOIN events e ON e.event_id=r.event_id AND e.committee_id=?
-     JOIN attendance a ON a.reg_id=r.reg_id
-     WHERE r.status='Confirmed' AND e.end_ts IS NOT NULL AND e.end_ts<=NOW()`,
-    [committeeId]
-  );
-  res.json({ issued: result.affectedRows });
+  const eventId = positiveInt(req.body?.event_id, "Event");
+  const conn = await db.getConnection();
+  let issued = 0;
+  let skipped = 0;
+  try {
+    await conn.beginTransaction();
+    const [events] = await conn.query<RowDataPacket[]>(
+      "SELECT committee_id,end_ts,end_ts IS NOT NULL AND end_ts<=NOW() AS completed FROM events WHERE event_id=? FOR UPDATE",
+      [eventId]
+    );
+    const event = events[0];
+    if (!event || event.committee_id !== committeeId) throw fail(404, "Event not found for this committee.");
+    if (!event.completed) throw fail(409, "Certificates can only be sent after an event is completed.");
+    const [total] = await conn.query<RowDataPacket[]>(
+      "SELECT COUNT(*) AS count FROM registrations WHERE event_id=? AND status='Confirmed'", [eventId]
+    );
+    const [result] = await conn.query<ResultSetHeader>(
+      `INSERT IGNORE INTO certificates (reg_id)
+       SELECT r.reg_id FROM registrations r
+       JOIN students s ON s.student_id=r.student_id AND s.is_active=1
+       JOIN attendance a ON a.reg_id=r.reg_id
+       WHERE r.event_id=? AND r.status='Confirmed'`,
+      [eventId]
+    );
+    issued = result.affectedRows;
+    skipped = Math.max(0, Number(total[0].count) - issued);
+    await conn.commit();
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+  res.json({ issued, skipped });
 }));
 app.get("/api/certificates", requireAuth, h(async (req, res) => {
   const scope = req.auth!.role === "student" ? "WHERE r.student_id=?" :
@@ -748,6 +827,33 @@ app.post("/api/admin/accounts", ...requireAdmin, h(async (req, res) => {
   res.status(201).json({ ok: true });
 }));
 
+app.get("/api/admin/accounts/pending", ...requireAdmin, h(async (_req, res) => {
+  res.json(await rows<RowDataPacket[]>(`
+    SELECT a.account_id,a.first_name,a.last_name,a.email,a.committee_id,c.name AS committee_name,a.created_at
+    FROM user_accounts a JOIN committees c ON c.committee_id=a.committee_id
+    WHERE a.role='committee' AND a.approval_status='Pending'
+    ORDER BY a.created_at ASC
+  `));
+}));
+
+app.patch("/api/admin/accounts/:id/approval", ...requireAdmin, h(async (req, res) => {
+  const accountId = positiveInt(req.params.id, "Account");
+  const decision = req.body?.decision;
+  if (decision !== "Approved" && decision !== "Rejected") {
+    throw fail(400, "Choose Approved or Rejected.");
+  }
+  const [result] = await db.query<ResultSetHeader>(
+    `UPDATE user_accounts SET approval_status=?
+     WHERE account_id=? AND role='committee' AND approval_status='Pending'`,
+    [decision,accountId]
+  );
+  if (!result.affectedRows) throw fail(404, "Pending committee account not found.");
+  if (decision === "Rejected") {
+    await db.query("DELETE FROM auth_sessions WHERE account_id=?", [accountId]);
+  }
+  res.json({ ok: true, approval_status: decision });
+}));
+
 app.post("/api/admin/committees", ...requireAdmin, h(async (req, res) => {
   const id = requiredText(req.body?.committee_id, "Committee ID", 15).toUpperCase();
   const name = requiredText(req.body?.name, "Name", 80);
@@ -768,10 +874,11 @@ app.post("/api/admin/venues", ...requireAdmin, h(async (req, res) => {
   res.status(201).json({ ok: true });
 }));
 
-app.post("/api/admin/events", ...requireAdmin, h(async (req, res) => {
+app.post("/api/admin/events", ...requireCommitteeManager, h(async (req, res) => {
   const b = req.body || {};
   const name = requiredText(b.name, "Event name", 150);
   const committee = requiredText(b.committee_id, "Committee", 15).toUpperCase();
+  if (committeeScope(req) !== committee) throw fail(403, "You can only create events for your assigned committee.");
   const capacity = b.capacity === "" || b.capacity == null ? null : positiveInt(b.capacity, "Capacity");
   const fee = b.fee === "" || b.fee == null ? null : Number(b.fee);
   if (fee != null && (!Number.isFinite(fee) || fee < 0)) throw fail(400, "Fee must be zero or greater.");
@@ -795,9 +902,11 @@ app.post("/api/admin/events", ...requireAdmin, h(async (req, res) => {
   );
   res.status(201).json({ ok: true });
 }));
-app.put("/api/admin/events/:id", ...requireAdmin, h(async (req, res) => {
+app.put("/api/admin/events/:id", ...requireCommitteeManager, h(async (req, res) => {
   const id = positiveInt(req.params.id, "Event");
   const b = req.body || {};
+  const committee = requiredText(b.committee_id, "Committee", 15).toUpperCase();
+  if (committeeScope(req) !== committee) throw fail(403, "You can only manage events for your assigned committee.");
   const name = requiredText(b.name, "Event name", 150);
   const capacity = b.capacity === "" || b.capacity == null ? null : positiveInt(b.capacity, "Capacity");
   const fee = b.fee === "" || b.fee == null ? null : Number(b.fee);
@@ -814,8 +923,11 @@ app.put("/api/admin/events/:id", ...requireAdmin, h(async (req, res) => {
   try {
     await conn.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
     await conn.beginTransaction();
-    const [current] = await conn.query<RowDataPacket[]>("SELECT event_id FROM events WHERE event_id=? FOR UPDATE", [id]);
+    const [current] = await conn.query<RowDataPacket[]>("SELECT event_id,committee_id FROM events WHERE event_id=? FOR UPDATE", [id]);
     if (!current.length) throw fail(404, "Event not found.");
+    if (req.auth!.role === "committee" && current[0].committee_id !== req.auth!.committee_id) {
+      throw fail(404, "Event not found for this committee.");
+    }
     const [counts] = await conn.query<RowDataPacket[]>(
       "SELECT COUNT(*) AS registered FROM registrations WHERE event_id=? AND status='Confirmed'", [id]);
     if (capacity != null && capacity < Number(counts[0].registered)) {
@@ -825,7 +937,7 @@ app.put("/api/admin/events/:id", ...requireAdmin, h(async (req, res) => {
       `UPDATE events SET committee_id=?,venue_id=?,name=?,description=?,start_ts=?,end_ts=?,fee=?,fee_note=?,audience=?,
         prize=?,contact=?,capacity=?,registration_open=?,registration_closes_at=?,eligible_dept_id=?,
         registration_question=? WHERE event_id=?`,
-      [requiredText(b.committee_id, "Committee", 15).toUpperCase(), b.venue_id || null, name, optionalText(b.description, 10000),
+      [committee, b.venue_id || null, name, optionalText(b.description, 10000),
         start, end, fee, optionalText(b.fee_note, 80), optionalText(b.audience, 60),
         optionalText(b.prize, 40), optionalText(b.contact, 4000), capacity, registrationOpen,
         closes, b.eligible_dept_id ? requiredText(b.eligible_dept_id, "Eligible department", 10).toUpperCase() : null,
