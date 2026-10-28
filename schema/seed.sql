@@ -1,64 +1,83 @@
 USE campuspulse;
 
-INSERT INTO departments VALUES
+-- 1. Departments
+INSERT INTO departments (dept_id, name) VALUES
  ('EXTC','Electronics & Telecommunication'),
  ('CSE','Computer Science & Engineering'),
- ('CE','Computer Engineering');
+ ('CE','Computer Engineering')
+ON DUPLICATE KEY UPDATE name=VALUES(name);
 
-INSERT INTO committees VALUES
- ('IEEE','IEEE SPIT','IEEE student branch','ieee_spit'),
- ('IEEECS','IEEE CS SPIT','IEEE Computer Society chapter','ieee.cs.spit'),
+-- 2. Committees
+INSERT INTO committees (committee_id, name, tagline, instagram_handle) VALUES
+ ('IEEE','IEEE SPIT','Advancing technology for humanity','ieee_spit'),
+ ('IEEECS','IEEE CS SPIT','IEEE Computer Society student chapter','ieee.cs.spit'),
  ('CSI','C.S.I. SPIT','Computer Society of India student branch','csispit'),
- ('MUDRA','Mudra','Dance, music & theatre','mudra_spit'),
- ('FACE','FACE','Placements & career prep','face_spit'),
- ('OCULUS','Oculus','Photography & film','o.c.u.l.u.s_s.p.i.t'),
- ('ECELL','E-Cell SPIT','Entrepreneurship cell','ecellspit'),
- ('WIE','IEEE WIE SPIT','Women in Engineering affinity group','wie_ieee_spit'),
- ('FEC','FEC SPIT','Student committee','fec_spit'),
- ('ENACTUS','Enactus SPIT','Enactus student chapter',NULL),
- ('AGILITY','Agility Cup','Sports & e-sports tournament',NULL),
- ('CAMPUS','SPIT Campus','Institute-level events',NULL);
+ ('MUDRA','Mudra','Dance, music & theatrical arts','mudra_spit'),
+ ('FACE','FACE','Placements, system design & career prep','face_spit'),
+ ('OCULUS','Oculus','Photography, cinematography & film','o.c.u.l.u.s_s.p.i.t'),
+ ('ROTARACT','Rotaract Club SPIT','Fellowship, leadership and community service','rotaract_spit'),
+ ('ECELL','E-Cell SPIT','Entrepreneurship and startup incubator','ecellspit')
+ON DUPLICATE KEY UPDATE name=VALUES(name), tagline=VALUES(tagline);
 
-INSERT INTO venues VALUES
- ('v408','Room 408 (New building)'),
- ('gym','Gymkhana'),
- ('raj','Rajgad Fort'),
- ('powai','Hiranandani Gardens, Powai');
+-- 3. Venues
+INSERT INTO venues (venue_id, name) VALUES
+ ('v408','Lab 408 (New building, 4th floor)'),
+ ('auditorium','SPIT Main Auditorium'),
+ ('gym','Gymkhana Indoor Complex'),
+ ('seminar1','Seminar Hall 1 (Ground Floor)'),
+ ('raj','Rajgad Fort (Outdoor)'),
+ ('powai','Hiranandani Gardens, Powai')
+ON DUPLICATE KEY UPDATE name=VALUES(name);
 
-INSERT INTO events(committee_id,venue_id,name,description,start_ts,end_ts,fee,fee_note,audience,prize) VALUES
- ('CSI','v408','Codehousie','Competitive Programming x Housie.','2026-10-15 17:00','2026-10-15 20:00',150,'Solo; Duo Rs.200','FE | SE | TE + BE','Rs.7,500'),
- ('CSI',NULL,'SourceStart','Open-source contest. Register, raise your PR and get your name on the leaderboard.',NULL,NULL,NULL,NULL,NULL,NULL),
- ('ENACTUS','raj','Rajgad Trek 26','Where history meets adventure.','2026-10-17 00:00','2026-10-18 23:59',NULL,NULL,NULL,NULL),
- ('AGILITY',NULL,'Table Tennis - Mens Singles','Agility Cup table tennis, mens singles.','2026-10-08 00:00','2026-10-08 23:59',NULL,NULL,NULL,NULL),
- ('AGILITY',NULL,'Table Tennis - Doubles + Womens Singles','Rescheduled to 26 Oct. Registrations extended.','2026-10-26 00:00','2026-10-26 23:59',NULL,NULL,NULL,NULL),
- ('AGILITY',NULL,'Chess','Agility Cup chess, 28 and 29 Oct.','2026-10-28 00:00','2026-10-29 23:59',NULL,NULL,NULL,NULL),
- ('AGILITY',NULL,'BGMI','Agility Cup e-sports takeover.','2026-10-12 00:00','2026-10-12 23:59',NULL,NULL,NULL,NULL),
- ('AGILITY',NULL,'Free Fire','Agility Cup e-sports takeover.','2026-10-13 00:00','2026-10-13 23:59',NULL,NULL,NULL,NULL),
- ('AGILITY',NULL,'FC Mobile & FC 25 (PS5)','Agility Cup e-sports takeover.','2026-10-15 00:00','2026-10-15 23:59',NULL,NULL,NULL,NULL),
- ('AGILITY',NULL,'Clash Royale','Agility Cup e-sports takeover.','2026-10-16 00:00','2026-10-16 23:59',NULL,NULL,NULL,NULL),
- ('CAMPUS','gym','Personal Safety & Self-Defence Workshop','Practical self-defence skills.','2026-10-08 16:00','2026-10-08 17:00',NULL,NULL,'Girls',NULL),
- ('CAMPUS','powai','Sardar Patel Run for Unity 2026','10 KM, 5 KM and 3 KM fun run.','2026-11-01 05:30','2026-11-01 08:30',NULL,'Free for SPIT students',NULL,NULL);
+-- 4. Events across committees
+INSERT INTO events (event_id, committee_id, venue_id, name, description, start_ts, end_ts, fee, fee_note, audience, prize, capacity, registration_open, registration_question) VALUES
+ (1, 'CSI', 'v408', 'CSI HackSprint 2026', 'An intensive 24-hour algorithmic development and systems hackathon.', DATE_SUB(NOW(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 1 DAY), 0, 'Free entry', 'All SPIT students', 'Rs. 25,000', 80, 0, 'Github profile link'),
+ (2, 'CSI', 'seminar1', 'CSI Web3 & Cloud Expo', 'Interactive masterclass on decentralized web architectures and cloud-native microservices.', DATE_SUB(NOW(), INTERVAL 1 HOUR), DATE_ADD(NOW(), INTERVAL 3 HOUR), 0, 'Free entry', 'Engineering Students', 'Trophies & Swag', 100, 1, 'Why do you want to attend?'),
+ (3, 'CSI', 'auditorium', 'CSI National Tech Conclave 2026', 'Annual tech keynote featuring industry leaders, robotics exhibits, and project showcases.', DATE_ADD(NOW(), INTERVAL 3 DAY), DATE_ADD(DATE_ADD(NOW(), INTERVAL 3 DAY), INTERVAL 6 HOUR), 0, 'Free', 'Open to all', 'Rs. 50,000', 250, 1, 'Areas of interest'),
+ (4, 'IEEE', 'v408', 'IEEE Embedded Systems Bootcamp', 'Hands-on workshop on STM32 microcontrollers and RTOS development.', DATE_SUB(NOW(), INTERVAL 3 DAY), DATE_SUB(NOW(), INTERVAL 2 DAY), 0, 'Free', 'EXTC and CSE students', 'Certificate & Kits', 60, 0, 'Prior C programming experience'),
+ (5, 'IEEE', 'auditorium', 'IEEE AI & Robotics Colloquium', 'Deep dive into autonomous mobile robots, computer vision, and ROS2.', DATE_ADD(NOW(), INTERVAL 5 DAY), DATE_ADD(DATE_ADD(NOW(), INTERVAL 5 DAY), INTERVAL 5 HOUR), 0, 'Free', 'All branches', 'Merit Awards', 150, 1, 'Robotics club member? (Yes/No)'),
+ (6, 'MUDRA', 'auditorium', 'Aarohan Annual Cultural Night', 'The biggest cultural showcase of SPIT featuring theatrical arts, music bands, and dance troupes.', DATE_ADD(NOW(), INTERVAL 7 DAY), DATE_ADD(DATE_ADD(NOW(), INTERVAL 7 DAY), INTERVAL 8 HOUR), 0, 'Free', 'All SPITians', 'Trophies', 300, 1, 'Performance category'),
+ (7, 'FACE', 'seminar1', 'FACE Campus Placement Masterclass', 'Comprehensive prep on system design, coding rounds, resume teardowns, and HR interviews.', DATE_ADD(NOW(), INTERVAL 2 DAY), DATE_ADD(DATE_ADD(NOW(), INTERVAL 2 DAY), INTERVAL 4 HOUR), 0, 'Free', 'TE & BE students', 'Mock Interview Pass', 120, 1, 'Target company / role'),
+ (8, 'OCULUS', 'powai', 'Oculus Cinematography Walk 2026', 'Field photography, framing techniques, and color grading workshop around Powai.', DATE_ADD(NOW(), INTERVAL 4 DAY), DATE_ADD(DATE_ADD(NOW(), INTERVAL 4 DAY), INTERVAL 4 HOUR), 0, 'Free', 'All photo enthusiasts', 'Camera Gear', 50, 1, 'Camera model (DSLR/Phone)')
+ON DUPLICATE KEY UPDATE name=VALUES(name), description=VALUES(description);
 
-INSERT INTO students
- (student_id,first_name,last_name,dept_id,study_year,division,email)
-SELECT CONCAT('MOCK',LPAD(n,3,'0')),
-       ELT(MOD(n-1,12)+1,'Aarav','Anaya','Ishaan','Meera','Kabir','Aditi','Reyansh','Sana','Vihaan','Ira','Arjun','Diya'),
-       ELT(MOD(FLOOR((n-1)/12),12)+1,'Shah','Patel','Desai','Rao','Mehta','Kulkarni','Joshi','Nair','Iyer','Khan','Gupta','Sharma'),
-       ELT(MOD(n-1,3)+1,'EXTC','CSE','CE'),
-       ELT(MOD(FLOOR((n-1)/3),4)+1,'FE','SE','TE','BE'),
-       ELT(MOD(FLOOR((n-1)/3),4)+1,'A','B','C','D'),
-       CONCAT('mock',LPAD(n,3,'0'),'@students.campuspulse.test')
-FROM (
- SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL
- SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL
- SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL SELECT 12 UNION ALL
- SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15 UNION ALL SELECT 16 UNION ALL
- SELECT 17 UNION ALL SELECT 18 UNION ALL SELECT 19 UNION ALL SELECT 20 UNION ALL
- SELECT 21 UNION ALL SELECT 22 UNION ALL SELECT 23 UNION ALL SELECT 24 UNION ALL
- SELECT 25 UNION ALL SELECT 26 UNION ALL SELECT 27 UNION ALL SELECT 28 UNION ALL
- SELECT 29 UNION ALL SELECT 30 UNION ALL SELECT 31 UNION ALL SELECT 32 UNION ALL
- SELECT 33 UNION ALL SELECT 34 UNION ALL SELECT 35 UNION ALL SELECT 36 UNION ALL
- SELECT 37 UNION ALL SELECT 38 UNION ALL SELECT 39 UNION ALL SELECT 40 UNION ALL
- SELECT 41 UNION ALL SELECT 42 UNION ALL SELECT 43 UNION ALL SELECT 44 UNION ALL
- SELECT 45 UNION ALL SELECT 46 UNION ALL SELECT 47 UNION ALL SELECT 48
-) AS numbers;
+-- 5. Students
+INSERT INTO students (student_id, first_name, last_name, dept_id, study_year, division, phone, email, gender, is_active, department_verified) VALUES
+ ('CP-S001', 'Samrudhi', 'Kadampi', 'CSE', 'TE', 'A', '9876543210', 'samrudhi@spit.ac.in', 'Female', 1, 1),
+ ('CP-S002', 'Aditya', 'Verma', 'CE', 'BE', 'B', '9876543211', 'aditya.v@spit.ac.in', 'Male', 1, 1),
+ ('CP-S003', 'Rhea', 'Kulkarni', 'EXTC', 'SE', 'A', '9876543212', 'rhea.k@spit.ac.in', 'Female', 1, 1),
+ ('CP-S004', 'Tanmay', 'Bhat', 'CSE', 'TE', 'B', '9876543213', 'tanmay.b@spit.ac.in', 'Male', 1, 1),
+ ('CP-S005', 'Ananya', 'Patel', 'CE', 'SE', 'C', '9876543214', 'ananya.p@spit.ac.in', 'Female', 1, 1),
+ ('CP-S006', 'Dev', 'Sharma', 'EXTC', 'BE', 'B', '9876543215', 'dev.s@spit.ac.in', 'Male', 1, 1),
+ ('CP-S007', 'Ira', 'Mehta', 'CSE', 'FE', 'A', '9876543216', 'ira.m@spit.ac.in', 'Female', 1, 1),
+ ('CP-S008', 'Kabir', 'Joshi', 'CE', 'TE', 'A', '9876543217', 'kabir.j@spit.ac.in', 'Male', 1, 1),
+ ('CP-S009', 'Sana', 'Khan', 'EXTC', 'SE', 'B', '9876543218', 'sana.k@spit.ac.in', 'Female', 1, 1),
+ ('CP-S010', 'Arjun', 'Gupta', 'CSE', 'BE', 'A', '9876543219', 'arjun.g@spit.ac.in', 'Male', 1, 1)
+ON DUPLICATE KEY UPDATE first_name=VALUES(first_name), last_name=VALUES(last_name);
+
+-- 6. Registrations, Attendance, Certificates
+INSERT IGNORE INTO registrations (reg_id, student_id, event_id, registered_on, status, application_answer) VALUES
+ (1, 'CP-S001', 1, CURRENT_DATE, 'Confirmed', 'https://github.com/samrudhi'),
+ (2, 'CP-S002', 1, CURRENT_DATE, 'Confirmed', 'https://github.com/aditya'),
+ (3, 'CP-S003', 1, CURRENT_DATE, 'Confirmed', 'https://github.com/rhea'),
+ (4, 'CP-S001', 3, CURRENT_DATE, 'Confirmed', 'Cloud Systems & AI'),
+ (5, 'CP-S004', 3, CURRENT_DATE, 'Confirmed', 'Competitive Programming'),
+ (6, 'CP-S003', 4, CURRENT_DATE, 'Confirmed', 'Basic C and Arduino'),
+ (7, 'CP-S006', 4, CURRENT_DATE, 'Confirmed', 'Embedded circuits'),
+ (8, 'CP-S005', 7, CURRENT_DATE, 'Confirmed', 'Placement prep');
+
+INSERT IGNORE INTO attendance (attendance_id, reg_id, status, check_in) VALUES
+ (1, 1, 'Attended', DATE_SUB(NOW(), INTERVAL 2 DAY)),
+ (2, 2, 'Attended', DATE_SUB(NOW(), INTERVAL 2 DAY)),
+ (3, 6, 'Attended', DATE_SUB(NOW(), INTERVAL 3 DAY));
+
+INSERT IGNORE INTO certificates (cert_id, reg_id, cert_type, issued_on) VALUES
+ (1, 1, 'Participation', CURRENT_DATE),
+ (2, 6, 'Participation', CURRENT_DATE);
+
+-- 7. Feedback
+INSERT INTO feedback (feedback_id, reg_id, student_id, committee_id, event_id, request_id, rating, comments, submitted_on) VALUES
+ (1, 1, 'CP-S001', 'CSI', 1, 'fdbk-csi-001', 5, 'Exceptional problem statements and smooth judging process. Great job CSI team!', CURRENT_DATE),
+ (2, 2, 'CP-S002', 'CSI', 1, 'fdbk-csi-002', 4, 'Great mentors during the overnight coding phase. Venue air conditioning could be improved.', CURRENT_DATE),
+ (3, 6, 'CP-S003', 'IEEE', 4, 'fdbk-ieee-001', 5, 'The hardware debugging kits provided were top-notch. Loved the hands-on sessions!', CURRENT_DATE)
+ON DUPLICATE KEY UPDATE rating=VALUES(rating), comments=VALUES(comments);
