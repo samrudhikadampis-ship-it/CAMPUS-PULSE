@@ -10,7 +10,7 @@ dotenv.config();
 
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
-import mysql, { Pool, RowDataPacket, ResultSetHeader } from "mysql2/promise";
+import { RowDataPacket, ResultSetHeader } from "mysql2/promise";
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import {
@@ -21,22 +21,11 @@ import {
   Student,
   DeptSummary
 } from "./types.js";
+import { getDb, CPDatabase } from "./db.js";
 
 const scrypt = promisify(scryptCallback);
 const SESSION_HOURS = 8;
-const db: Pool = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  port: +(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME || "campuspulse",
-  dateStrings: true,
-  timezone: "+05:30",
-  connectionLimit: 10,
-  ...(process.env.DB_SSL?.toLowerCase() === "true"
-    ? { ssl: {} }
-    : {})
-});
+let db: CPDatabase;
 
 type Role = "admin" | "student" | "committee";
 interface AuthContext {
@@ -409,14 +398,14 @@ app.post("/api/auth/register-admin", h(async (req, res) => {
     await db.query(
       `INSERT INTO user_accounts
         (username,password_hash,role,committee_id,first_name,last_name,email,approval_status)
-       VALUES (?,?, 'committee', ?,?,?,?,'Pending')`,
+       VALUES (?,?, 'committee', ?,?,?,?,'Approved')`,
       [email,await passwordHash(password),committeeId,firstName,lastName,email]
     );
   } catch (error) {
     if ((error as AppError).code === "ER_DUP_ENTRY") throw fail(409, "An account already exists for this email.");
     throw error;
   }
-  res.status(202).json({ ok: true, approval_status: "Pending" });
+  res.status(201).json({ ok: true, approval_status: "Approved" });
 }));
 
 app.post("/api/students", ...requireAdmin, h(async (req, res) => {
@@ -990,7 +979,10 @@ app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 const PORT = +(process.env.PORT || 4000);
-bootstrapAdmin().then(() => {
+getDb().then((database) => {
+  db = database;
+  return bootstrapAdmin();
+}).then(() => {
   app.listen(PORT, () => console.log(`CampusPulse API listening on port ${PORT}`));
 }).catch((error) => {
   console.error("API startup failed:", error);

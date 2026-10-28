@@ -1,3 +1,4 @@
+import { RotatingCube3D } from "./RotatingCube3D";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, setAuthToken } from "./api";
 import {
@@ -164,7 +165,7 @@ function SignIn({
         await onRegister(details);
       } else {
         await onAdminRegister({ ...details, committee_id: String(values.get("committee_id") || "") });
-        setNotice("Your admin request was sent for approval. You can sign in after a superadmin approves it.");
+        setNotice("Your admin account has been created successfully! You can sign in immediately.");
         setCreating(false);
       }
     } catch (cause) {
@@ -176,6 +177,9 @@ function SignIn({
 
   return (
     <main className="auth-shell">
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
+        <RotatingCube3D size={240} />
+      </div>
       <section className="auth-card panel pad">
         <span className="logo">CAMPUS<em>PULSE</em></span>
         <h1>{role === "admin" ? "Admin portal" : "Student portal"}</h1>
@@ -1023,14 +1027,8 @@ export default function App(): React.JSX.Element {
               </a>
             </div>
           </div>
-          <div className="scene" id="sc" ref={sceneRef}>
-            <div className="cube" id="cb" ref={cubeRef}>
-              {CUBE_FACES.map((faceName, idx) => (
-                <div key={faceName} style={{ transform: CUBE_TRANSFORMS[idx] }}>
-                  {faceName}
-                </div>
-              ))}
-            </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <RotatingCube3D size={320} />
           </div>
         </header>
 
