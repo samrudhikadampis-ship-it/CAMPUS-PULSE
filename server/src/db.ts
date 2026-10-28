@@ -84,30 +84,40 @@ function wrapDb(db: Database): CPDatabase {
     const lower = cleanSql.toLowerCase();
     const isSelect = lower.startsWith("select") || lower.startsWith("with");
 
-    if (isSelect) {
-      const stmt = db.prepare(cleanSql);
-      if (boundParams && boundParams.length > 0) stmt.bind(boundParams as any);
-      const rows: any[] = [];
-      while (stmt.step()) {
-        rows.push(stmt.getAsObject());
-      }
-      stmt.free();
-      return [rows as unknown as T, null];
-    } else {
-      const stmt = db.prepare(cleanSql);
-      if (boundParams && boundParams.length > 0) stmt.bind(boundParams as any);
-      stmt.step();
-      stmt.free();
-      saveDb();
+    try {
+      if (isSelect) {
+        const stmt = db.prepare(cleanSql);
+        if (boundParams && boundParams.length > 0) stmt.bind(boundParams as any);
+        const rows: any[] = [];
+        while (stmt.step()) {
+          rows.push(stmt.getAsObject());
+        }
+        stmt.free();
+        return [rows as unknown as T, null];
+      } else {
+        const stmt = db.prepare(cleanSql);
+        if (boundParams && boundParams.length > 0) stmt.bind(boundParams as any);
+        stmt.step();
+        stmt.free();
+        saveDb();
 
-      const info = db.exec("SELECT changes() AS affectedRows, last_insert_rowid() AS insertId");
-      let affectedRows = 0;
-      let insertId = 0;
-      if (info.length > 0 && info[0].values.length > 0) {
-        affectedRows = Number(info[0].values[0][0]) || 0;
-        insertId = Number(info[0].values[0][1]) || 0;
+        const info = db.exec("SELECT changes() AS affectedRows, last_insert_rowid() AS insertId");
+        let affectedRows = 0;
+        let insertId = 0;
+        if (info.length > 0 && info[0].values.length > 0) {
+          affectedRows = Number(info[0].values[0][0]) || 0;
+          insertId = Number(info[0].values[0][1]) || 0;
+        }
+        return [[] as any, { affectedRows, insertId }];
       }
-      return [[] as any, { affectedRows, insertId }];
+    } catch (err: any) {
+      if (err?.message?.includes("UNIQUE constraint failed")) {
+        const dupErr: any = new Error("This record already exists.");
+        dupErr.code = "ER_DUP_ENTRY";
+        dupErr.status = 409;
+        throw dupErr;
+      }
+      throw err;
     }
   };
 
@@ -429,7 +439,6 @@ async function initSchema(db: Database) {
   `);
 
   // Registrations for CSI Event 1 (Completed event)
-  // Student 1 (Samrudhi): Registered & Attended (Certificate issued)
   db.run(`
     INSERT INTO registrations (reg_id, student_id, event_id, registered_on, status, application_answer)
     VALUES (1, 'CP-S001', 1, date('now', '-3 days'), 'Confirmed', 'https://github.com/samrudhi');
@@ -439,7 +448,6 @@ async function initSchema(db: Database) {
     VALUES (1, 1, 'Participation', date('now', '-1 days'));
   `);
 
-  // Student 2 (Aditya): Registered & Attended (Certificate NOT yet issued - ready to test "Issue Certificates")
   db.run(`
     INSERT INTO registrations (reg_id, student_id, event_id, registered_on, status, application_answer)
     VALUES (2, 'CP-S002', 1, date('now', '-3 days'), 'Confirmed', 'https://github.com/aditya');
@@ -447,13 +455,11 @@ async function initSchema(db: Database) {
     VALUES (2, 2, 'Attended', datetime('now', '-2 days', '+15 minutes'));
   `);
 
-  // Student 3 (Rhea): Registered but Not Attended (No check_in row)
   db.run(`
     INSERT INTO registrations (reg_id, student_id, event_id, registered_on, status, application_answer)
     VALUES (3, 'CP-S003', 1, date('now', '-3 days'), 'Confirmed', 'https://github.com/rhea');
   `);
 
-  // Registrations for CSI Event 3 (Upcoming)
   db.run(`
     INSERT INTO registrations (reg_id, student_id, event_id, registered_on, status, application_answer)
     VALUES 
@@ -461,7 +467,6 @@ async function initSchema(db: Database) {
     (5, 'CP-S004', 3, date('now'), 'Confirmed', 'Competitive Programming');
   `);
 
-  // Registrations for IEEE Event 4 (Completed)
   db.run(`
     INSERT INTO registrations (reg_id, student_id, event_id, registered_on, status, application_answer)
     VALUES (6, 'CP-S003', 4, date('now', '-4 days'), 'Confirmed', 'Basic C and Arduino');
